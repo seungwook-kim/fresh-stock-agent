@@ -226,16 +226,19 @@ def _weather():
 
 def _fetch_notes(args: argparse.Namespace) -> None:
     from .service import StoreService
-    from .store import Store
+    from .store import Database, Store
 
-    service = StoreService(Store(args.db), load_catalog(), MarketCalendar(), weather=_weather())
+    db = Database(args.db)
+    weather = _weather()
     day = args.day or date.today()
-    added, error = service.refresh_auto_notes(day, args.days)
-    print(f"{day} 다음 날부터 {args.days}일: 메모 {len(added)}개 추가")
-    for n in added:
-        print(f"  {n.day} [{n.source}] {n.text}")
-    if error:
-        print(error)
+    for store_id in db.store_ids():
+        service = StoreService(Store(db, store_id), load_catalog(), MarketCalendar(), weather=weather)
+        added, error = service.refresh_auto_notes(day, args.days)
+        print(f"[{db.store_name(store_id)}] {day} 다음 날부터 {args.days}일: 메모 {len(added)}개 추가")
+        for n in added:
+            print(f"  {n.day} [{n.source}] {n.text}")
+        if error:
+            print(f"  {error}")
 
 
 def _port_in_use(host: str, port: int) -> bool:
@@ -271,9 +274,9 @@ def _eval_retrieval(args: argparse.Namespace) -> None:
 
 
 def _copy_db(args: argparse.Namespace) -> None:
-    from .store import Store, mask_url
+    from .store import Database, mask_url
 
-    source, target = Store(args.source), Store(args.target)
+    source, target = Database(args.source), Database(args.target)
     counts = target.load(source.dump())
     print(f"{mask_url(args.source)} -> {mask_url(args.target)}")
     for table, n in counts.items():

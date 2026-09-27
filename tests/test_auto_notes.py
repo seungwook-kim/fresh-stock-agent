@@ -148,3 +148,10 @@ def test_web_news_failure_is_shown():
 def test_news_button_hidden_without_search_llm():
     service, _ = _service()
     assert "AI로 건강 기사·방송 찾기" not in TestClient(create_app(service)).get("/").text
+
+
+def test_auto_notes_keep_their_source():
+    service, first = _service(weather=WeatherSource(fetch=FakeWeather({date(2026, 8, 1): (70, 30)})))
+    service.refresh_auto_notes(first)
+    sources = {n.text: n.source for n in service.store.note_records()}
+    assert sources["비 예보 (강수확률 70%)"] == "날씨"

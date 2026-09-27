@@ -176,7 +176,7 @@ class StoreService:
         existing = {(d, t) for _, d, t in self.store.notes(start, end)}
         added = [n for n in notes if (n.day, n.text) not in existing]
         for n in added:
-            self.store.add_note(n.day, n.text)
+            self.store.add_note(n.day, n.text, source=n.source)
         return added, error
 
     def find_food_news(self, day: date) -> list[FoodNews]:
