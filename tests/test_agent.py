@@ -130,3 +130,9 @@ def test_prompt_includes_store_notes():
     llm = ScriptedLLM([])
     run_simulation(catalog, MarketCalendar(), AgentPolicy(llm), start=date(2026, 9, 20), days=5, typo_rate=0)
     assert any("추석" in p for p in llm.prompts)
+
+
+def test_summary_tag_fragments_are_removed():
+    llm = ScriptedLLM([_submit(summary="생강을 늘렸습니다.</summary>")])
+    r = _run(llm, days=2)
+    assert r.policy.summaries[0][1] == "생강을 늘렸습니다."

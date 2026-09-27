@@ -11,6 +11,7 @@ LLM은 "무엇이 평소의 몇 배 팔릴지"만 판단하고, 발주 수량은
 """
 
 import math
+import re
 from dataclasses import dataclass
 from datetime import date
 from importlib import resources
@@ -218,7 +219,8 @@ class AgentPolicy:
             self.decisions.append(
                 AgentDecision(ctx.today, item.id, base[item.id], qty, ", ".join(factors), " / ".join(reasons))
             )
-        self.summaries.append((ctx.today, resp["summary"]))
+        # 모델이 요약 끝에 태그 조각(</summary> 등)을 붙이는 경우가 있어 지운다
+        self.summaries.append((ctx.today, re.sub(r"\s*</?[a-z_]+>\s*$", "", resp["summary"].strip())))
         return orders
 
     def _prompt(self, ctx: OrderContext, base: dict[str, int], lookups: list[str], recalled: str | None) -> str:
