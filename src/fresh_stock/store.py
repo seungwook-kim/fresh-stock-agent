@@ -167,8 +167,14 @@ class Store:
             from psycopg_pool import ConnectionPool
 
             # 원격 DB(Supabase)는 연결이 끊길 수 있어서 풀이 연결 상태를 확인하고 다시 잇는다
+            # prepare_threshold=None: Supabase 트랜잭션 모드 풀러(포트 6543)는 prepared statement를 지원하지 않는다
             self._pool = ConnectionPool(
-                self.url, min_size=1, max_size=4, check=ConnectionPool.check_connection, open=True
+                self.url,
+                min_size=1,
+                max_size=4,
+                check=ConnectionPool.check_connection,
+                kwargs={"prepare_threshold": None},
+                open=True,
             )
         else:
             if self.url != ":memory:":
