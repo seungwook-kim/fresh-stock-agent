@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block title %}가게 선택{% endblock %}
+{% block content %}
+<h1>가게 선택</h1>
+{% if memberships %}
+<div class="card" style="padding:6px 16px">
+  {% for m in memberships %}
+    <div class="row" style="justify-content:space-between; border-bottom:1px solid var(--line); padding:10px 0">
+      <span><b>{{ m.store_name }}</b> <span class="muted">· {{ '사장님' if m.role == 'owner' else '직원' }}{{ ' · 지금 가게' if m.store_id == current }}</span></span>
+      <form method="post" action="/stores/{{ m.store_id }}/select"><button class="btn small">열기</button></form>
+    </div>
+  {% endfor %}
+</div>
+{% else %}
+<div class="card">아직 속한 가게가 없어요. 사장님께 이 구글 계정({{ user }})을 가게 멤버로 추가해 달라고 하거나, 새 가게를 만드세요.</div>
+{% endif %}
+<h2>새 가게 만들기</h2>
+<div class="card">
+  <form method="post" action="/stores" class="row">
+    <input type="text" name="name" placeholder="가게 이름" required style="flex:1; min-width:180px">
+    <button class="btn small">만들기</button>
+  </form>
+  <p class="muted" style="margin-bottom:0">만든 사람이 사장님이 되고, 가게 관리에서 직원 구글 계정을 추가할 수 있어요.</p>
+</div>
+{% endblock %}

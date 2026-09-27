@@ -21,7 +21,7 @@
   <img class="sheet" src="/sheet/image/{{ day.isoformat() }}" alt="{{ day | day }} 마감 재고표">
 </details>
 
-<form method="post" action="/sheet/confirm">
+<form method="post" action="/sheet/confirm" data-loading="재고를 저장하고 발주 추천을 만드는 중이에요. 확인하지 않은 메모가 있으면 AI가 확인하느라 1~3분 걸려요.">
 <div class="card" style="padding:6px 8px">
   <table>
     <colgroup><col><col class="item-col"><col class="qty-col"></colgroup>

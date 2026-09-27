@@ -4,6 +4,7 @@
 """
 
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import date, timedelta
 from statistics import mean
@@ -12,15 +13,15 @@ from .accounting import clearance_estimate, regular_sales_series
 from .agent import AgentPolicy
 from .auto_notes import HEAT_PREFIX, RAIN_PREFIX, AutoNote, WeatherSource, collect
 from .catalog import Catalog
-from .llm import ImageInput, LLMClient
+from .llm import ImageInput, LLMClient, LLMError
 from .market_calendar import MarketCalendar
 from .memory import DayMemoryBank
-from .news import FoodNews, find_food_news
+from .research import describe_for_agent, research_note
 from .messages import LLMGreetingWriter, OrderMessage, build_messages
 from .ordering import OrderContext, SeasonalPolicy, check_order
 from .recognition import recognize_sheet
 from .simulator import MARKDOWN_RATE
-from .store import OrderLineRecord, OrderPlan, SheetRowRecord, Store
+from .store import OWNER_NOTE, Note, OrderLineRecord, OrderPlan, Research, SheetRowRecord, Store
 
 SHEET, ORDER = "sheet", "order"
 
@@ -47,7 +48,7 @@ class StoreService:
         memory: DayMemoryBank | None = None,
         auto_notes: bool = False,
         weather: WeatherSource | None = None,
-        search_llm_factory: Callable[[], LLMClient] | None = None,
+        research_llm_factory: Callable[[], LLMClient] | None = None,
     ):
         self.store = store
         self.catalog = catalog
@@ -57,7 +58,7 @@ class StoreService:
         self.memory = memory  # 과거 비슷한 날 검색 (RAG). 없으면 경험 노트만 쓴다
         self.auto_notes = auto_notes  # 발주 추천을 만들 때 날씨·명절 메모를 먼저 가져온다
         self.weather = weather
-        self.search_llm_factory = search_llm_factory  # 웹 검색이 되는 LLM (건강 기사·방송 찾기)
+        self.research_llm_factory = research_llm_factory  # 웹 검색이 되는 LLM (사장님 메모 확인)
 
     # 지금 할 일 ------------------------------------------------------------------
 
@@ -145,8 +146,9 @@ class StoreService:
             return None
         cover = self.calendar.cover_days(arrival)
         notes: dict[date, list[str]] = {}
-        for _, d, text in self.store.notes(cover[0], cover[-1]):
-            notes.setdefault(d, []).append(text)
+        for note in self.store.note_records(cover[0], cover[-1]):
+            # 사장님 메모는 AI 조사 결과(확인 여부, 관련 품목)와 함께 에이전트에게 준다
+            notes.setdefault(note.day, []).append(describe_for_agent(note, self.catalog))
         note_log: dict[date, list[str]] = {}
         for _, d, text in self.store.notes(end=day):
             note_log.setdefault(d, []).append(text)
@@ -179,16 +181,41 @@ class StoreService:
             self.store.add_note(n.day, n.text, source=n.source)
         return added, error
 
-    def find_food_news(self, day: date) -> list[FoodNews]:
-        """AI가 웹 검색으로 최근 건강 기사·방송에서 효능이 소개된 우리 품목을 찾는다. 메모 제안용."""
-        if self.search_llm_factory is None:
-            raise RuntimeError("웹 검색이 되는 LLM이 필요합니다.")
-        return find_food_news(self.search_llm_factory(), self.catalog, day)
+    def research_notes(self, notes: list[Note]) -> dict[int, Research]:
+        """사장님 메모를 AI가 웹 검색으로 확인하고 저장한다. 여러 메모는 동시에 조사한다."""
+        if self.research_llm_factory is None or not notes:
+            return {}
+        llm = self.research_llm_factory()
+
+        def one(note: Note) -> tuple[int, Research]:
+            try:
+                return note.id, research_note(llm, self.catalog, note)
+            except LLMError as e:
+                # 실패해도 발주 추천은 나가야 한다. 실패로 남기고, 화면에서 다시 조사할 수 있다
+                return note.id, Research(False, f"AI가 조사하지 못했습니다: {str(e)[:80]}", (), ())
+
+        with ThreadPoolExecutor(max_workers=3) as pool:
+            results = dict(pool.map(one, notes))
+        for note_id, research in results.items():
+            self.store.save_research(note_id, research)
+        return results
+
+    def pending_research(self, day: date) -> list[Note]:
+        """day 발주가 버틸 날들의 사장님 메모 중 아직 AI가 확인하지 않은 것."""
+        arrival = day + timedelta(days=1)
+        if not self.calendar.is_supply_day(arrival):
+            return []
+        cover = self.calendar.cover_days(arrival)
+        return [
+            n for n in self.store.note_records(cover[0], cover[-1]) if n.source == OWNER_NOTE and n.research is None
+        ]
 
     def make_plan(self, day: date) -> OrderPlan | None:
         """발주 추천을 새로 만든다. 가게 메모가 있으면 에이전트가 조정한다."""
         if self.auto_notes:
             self.refresh_auto_notes(day)
+        # 사장님 메모는 발주 추천을 만들 때 AI가 웹 검색으로 확인한다 (스케줄러 없이)
+        self.research_notes(self.pending_research(day))
         ctx = self.order_context(day)
         if ctx is None:
             return None

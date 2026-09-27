@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% set active = "members" %}
+{% block title %}가게 관리{% endblock %}
+{% block content %}
+<h1>가게 관리</h1>
+{% if error %}<div class="alert">{{ error }}</div>{% endif %}
+<div class="card" style="padding:6px 16px">
+  {% for email, r in members %}
+    <div class="row" style="justify-content:space-between; border-bottom:1px solid var(--line); padding:8px 0">
+      <span>{{ email }} <span class="muted">· {{ '사장님' if r == 'owner' else '직원' }}</span></span>
+      {% if role == 'owner' %}
+        <form method="post" action="/members/remove"><input type="hidden" name="email" value="{{ email }}"><button class="btn small secondary">빼기</button></form>
+      {% endif %}
+    </div>
+  {% endfor %}
+</div>
+{% if role == 'owner' %}
+<h2>멤버 추가</h2>
+<div class="card">
+  <form method="post" action="/members" class="row">
+    <input type="email" name="email" placeholder="직원 구글 계정 이메일" required style="flex:1; min-width:180px">
+    <select name="role"><option value="staff">직원</option><option value="owner">사장님</option></select>
+    <button class="btn small">추가</button>
+  </form>
+  <p class="muted" style="margin-bottom:0">추가한 사람은 그 구글 계정으로 로그인하면 이 가게를 쓸 수 있어요.</p>
+</div>
+{% else %}
+<p class="muted">멤버 추가와 삭제는 사장님만 할 수 있어요.</p>
+{% endif %}
+<p><a href="/stores">다른 가게 열기 · 새 가게 만들기</a></p>
+{% endblock %}

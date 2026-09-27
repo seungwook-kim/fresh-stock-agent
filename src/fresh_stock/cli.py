@@ -165,12 +165,14 @@ def _eval_sheets(args: argparse.Namespace) -> None:
 
 
 def _serve(args: argparse.Namespace) -> None:
+    import secrets
+
     import uvicorn
 
     from .demo import seed_demo
     from .service import StoreService
-    from .store import Store, mask_url
-    from .web import create_app
+    from .store import Database, Store, mask_url
+    from .web import AuthConfig, create_app
 
     if args.port is None:
         port = _free_port(args.host, DEFAULT_PORT)
@@ -181,33 +183,59 @@ def _serve(args: argparse.Namespace) -> None:
     else:
         port = args.port
 
-    store = Store(args.db)
+    db = Database(args.db)
     print(f"DB: {mask_url(args.db)}")
     catalog, calendar = load_catalog(), MarketCalendar()
-    if args.demo and store.last_closed_day() is None:
-        first = seed_demo(store, catalog, calendar, args.start, args.days, args.seed)
-        print(f"데모 기록 {args.days}일을 넣었습니다. {first} 마감 재고표부터 시작합니다.")
+    demo_store_id = None
+    if args.demo:
+        ids = db.store_ids()
+        if ids:
+            demo_store_id = ids[0]
+        else:
+            demo_store_id = db.create_store("데모 가게", os.environ.get("FRESH_STOCK_DEMO_OWNER", "demo@local"))
+            first = seed_demo(Store(db, demo_store_id), catalog, calendar, args.start, args.days, args.seed)
+            print(f"데모 가게에 기록 {args.days}일을 넣었습니다. {first} 마감 재고표부터 시작합니다.")
 
-    def llm_factory() -> LLMClient:
-        return _llm(args)
+    weather = _weather()
+    log_dir = args.llm_log
 
-    def search_llm_factory() -> LLMClient:
-        # 웹 검색은 low에서 일찍 포기하는 경우가 있어 medium으로 둔다
-        return make_llm(args.backend, args.model, "medium", args.llm_log, web_search=True)
+    def make_service(store_id: int) -> StoreService:
+        log = log_dir / f"store-{store_id}.jsonl"
 
-    memory = None if args.no_rag else _memory()
-    service = StoreService(
-        store,
-        catalog,
-        calendar,
-        llm_factory,
-        args.store_name,
-        memory,
-        auto_notes=not args.no_auto_notes,
-        weather=_weather(),
-        search_llm_factory=search_llm_factory if args.backend == "claude-code" else None,
+        def llm_factory() -> LLMClient:
+            return make_llm(args.backend, args.model, args.effort, log)
+
+        def research_llm_factory() -> LLMClient:
+            # 웹 검색은 low에서 일찍 포기하는 경우가 있어 medium으로 둔다
+            return make_llm(args.backend, args.model, "medium", log, web_search=True)
+
+        return StoreService(
+            Store(db, store_id),
+            catalog,
+            calendar,
+            llm_factory,
+            db.store_name(store_id) or "우리가게",
+            None if args.no_rag else _memory(),
+            auto_notes=not args.no_auto_notes,
+            weather=weather,
+            research_llm_factory=research_llm_factory if args.backend == "claude-code" else None,
+        )
+
+    secret = os.environ.get("FRESH_STOCK_SECRET")
+    if not secret:
+        secret = secrets.token_urlsafe(32)
+        print("FRESH_STOCK_SECRET이 없어 임시 세션 키를 씁니다. 서버를 다시 켜면 다시 로그인해야 합니다.")
+    auth = AuthConfig(
+        secret_key=secret,
+        google_client_id=os.environ.get("GOOGLE_CLIENT_ID"),
+        google_client_secret=os.environ.get("GOOGLE_CLIENT_SECRET"),
+        dev_login=args.dev_login or os.environ.get("FRESH_STOCK_DEV_LOGIN") == "1",
+        demo_store_id=demo_store_id,
+        secure_cookies=os.environ.get("FRESH_STOCK_SECURE_COOKIES") == "1",
     )
-    app = create_app(service, args.llm_log)
+    print(f"로그인: 구글 {'켜짐' if auth.google_enabled else '꺼짐 (GOOGLE_CLIENT_ID/SECRET 없음)'}"
+          f", 개발용 로그인 {'켜짐' if auth.dev_login else '꺼짐'}")
+    app = create_app(db, make_service, auth, log_dir)
     print(f"http://{args.host}:{port} 에서 열립니다.", flush=True)
     uvicorn.run(app, host=args.host, port=port, log_level="warning")
 
@@ -396,13 +424,13 @@ def main() -> None:
         help="SQLite 파일 경로 또는 postgresql:// 주소 (환경변수 FRESH_STOCK_DB, .env로도 정한다)",
     )
     srv.add_argument("--demo", action="store_true", help="빈 DB면 시뮬레이션 기록을 넣고 시작한다")
-    srv.add_argument("--store-name", default="우리가게")
+    srv.add_argument("--dev-login", action="store_true", help="개발용 로그인(이메일만 입력)을 켠다. PC에서 확인할 때만")
     srv.add_argument("--host", default="127.0.0.1")
     srv.add_argument("--port", type=int, default=None, help="지정하지 않으면 8799번부터 빈 포트를 찾아 쓴다")
     srv.add_argument("--no-rag", action="store_true", help="과거 비슷한 날 검색을 끈다 (임베딩 모델을 받지 않는다)")
     srv.add_argument("--no-auto-notes", action="store_true", help="발주 추천 때 날씨·명절 메모를 자동으로 가져오지 않는다")
     _add_sim_args(srv)
-    srv.set_defaults(days=60, llm_log=Path("out/llm_web.jsonl"))
+    srv.set_defaults(days=60, llm_log=Path("out/llm"))  # AI 호출 기록은 가게별 파일로 남긴다
 
     ret = sub.add_parser("eval-retrieval", help="가게 메모 검색 방식(BM25, 임베딩, 하이브리드)을 비교한다")
     ret.add_argument("--bm25-only", action="store_true", help="임베딩 모델 없이 BM25만 잰다")

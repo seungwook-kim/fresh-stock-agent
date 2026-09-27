@@ -10,7 +10,7 @@
   {% else %}
     <h1>{{ status_day | day }} 발주를 확인할 차례예요</h1>
     <p class="muted">마감 재고로 다음 입고분 발주 추천을 만들었어요. 확인하고 승인하면 거래처 문자가 만들어져요.</p>
-    <a class="btn block" href="/order">발주 확인하기</a>
+    <a class="btn block" href="/order" data-loading="발주 추천을 만드는 중이에요. 확인하지 않은 메모가 있으면 AI가 확인하느라 1~3분 걸려요.">발주 확인하기</a>
   {% endif %}
   {% if last_plan %}
     <p style="margin:12px 0 0"><a href="/messages?day={{ last_plan.order_day.isoformat() }}">{{ last_plan.arrival | day }} 입고분 거래처 문자 다시 보기</a></p>
@@ -19,46 +19,44 @@
 
 <h2>가게 메모</h2>
 <div class="card">
-  <p class="muted" style="margin-top:0">날씨 예보, 명절, TV 방송처럼 평소와 다를 일을 적어 두면 발주 에이전트가 참고해요.
-    날씨와 명절은 발주 추천을 만들 때 자동으로 가져와요.</p>
+  <p class="muted" style="margin-top:0">TV 방송, 건강 기사, 동네 행사처럼 들은 이야기를 적어 두면, 발주 추천을 만들 때
+    AI가 웹 검색으로 확인하고 반영해요. 날씨와 명절은 자동으로 가져와요.</p>
   {% if auto is not none %}<div class="note">날씨·명절 메모 {{ auto }}개를 새로 넣었어요.{% if auto_error %} {{ auto_error }}{% endif %}</div>{% endif %}
-  {% for note_id, d, text in notes %}
-    <div class="row" style="justify-content:space-between; border-bottom:1px solid var(--line); padding:6px 0">
-      <span><b>{{ d | day }}</b> {{ text }}</span>
-      <form method="post" action="/notes/{{ note_id }}/delete"><button class="btn small secondary">삭제</button></form>
+  {% for n in notes %}
+    <div style="border-bottom:1px solid var(--line); padding:8px 0">
+      <div class="row" style="justify-content:space-between">
+        <span><b>{{ n.day | day }}</b> {{ n.text }}
+          {% if n.source != owner_note %}<span class="muted">· {{ n.source }} 자동</span>{% endif %}</span>
+        <form method="post" action="/notes/{{ n.id }}/delete"><button class="btn small secondary">삭제</button></form>
+      </div>
+      {% if n.source == owner_note %}
+        {% if n.research %}
+          <div class="{{ 'reason' if n.research.confirmed else 'flags' }}" style="margin-top:4px">
+            {{ 'AI 확인' if n.research.confirmed else 'AI가 확인하지 못함' }}: {{ n.research.summary }}
+            {% if n.research['items'] %}<br>관련 품목: {% for i in n.research['items'] %}{{ catalog.item(i).name }}{{ ', ' if not loop.last }}{% endfor %}{% endif %}
+            {% for title, url in n.research.sources %}<br><a href="{{ url }}" target="_blank" rel="noopener">{{ title }}</a>{% endfor %}
+          </div>
+        {% else %}
+          <div class="muted" style="margin-top:4px">발주 추천을 만들 때 AI가 확인해요.</div>
+        {% endif %}
+        {% if can_research %}
+          <form method="post" action="/notes/{{ n.id }}/research" data-loading="AI가 메모를 웹 검색으로 확인하는 중이에요 (1~3분)." style="margin-top:4px">
+            <button class="btn small secondary">{{ '다시 확인' if n.research else '지금 확인' }}</button>
+          </form>
+        {% endif %}
+      {% endif %}
     </div>
   {% else %}
     <p class="muted">앞으로 예정된 메모가 없어요.</p>
   {% endfor %}
   <form method="post" action="/notes" class="row" style="margin-top:10px">
     <input type="date" name="day" value="{{ default_note_day }}" required>
-    <input type="text" name="text" placeholder="예: 비 예보, TV에서 양배추 효능 소개" style="flex:1; min-width:180px" required>
+    <input type="text" name="text" placeholder="예: 어제 TV에서 양배추가 몸에 좋다고 나왔대" style="flex:1; min-width:180px" required>
     <button class="btn small">추가</button>
   </form>
   <div class="row" style="margin-top:10px">
     <form method="post" action="/notes/auto" data-loading="날씨와 명절을 가져오는 중이에요."><button class="btn small secondary">날씨·명절 가져오기</button></form>
-    {% if can_search %}<form method="post" action="/notes/news"><button class="btn small secondary" {{ 'disabled' if news.status == 'running' }}>AI로 건강 기사·방송 찾기</button></form>{% endif %}
   </div>
-  {% if news.status == 'running' %}
-    <meta http-equiv="refresh" content="15">
-    <p class="muted">AI가 최근 건강 기사와 방송을 찾는 중이에요 (3~4분). 이 화면은 15초마다 새로고침돼요.</p>
-  {% elif news.status == 'error' %}
-    <p class="warning">건강 기사·방송을 찾지 못했어요: {{ news.error }}</p>
-  {% elif news.status == 'done' %}
-    <div style="margin-top:10px"><b>AI가 찾은 제안</b> <span class="muted">· 확인하고 맞으면 메모로 추가하세요</span></div>
-    {% for n in news['items'] %}
-      <div class="row" style="justify-content:space-between; border-bottom:1px solid var(--line); padding:6px 0">
-        <span>{{ n.note() }}<br><a class="muted" href="{{ n.url }}" target="_blank" rel="noopener">{{ n.title }}</a></span>
-        <form method="post" action="/notes">
-          <input type="hidden" name="day" value="{{ (news.day + timedelta1).isoformat() }}">
-          <input type="hidden" name="text" value="{{ n.note() }}">
-          <button class="btn small">메모로 추가</button>
-        </form>
-      </div>
-    {% else %}
-      <p class="muted">최근 기사·방송에서 우리 품목은 찾지 못했어요.</p>
-    {% endfor %}
-  {% endif %}
 </div>
 
 <h2>최근 매출</h2>

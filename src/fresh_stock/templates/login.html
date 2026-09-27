@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% block title %}로그인{% endblock %}
+{% block content %}
+<h1>fresh-stock</h1>
+<p class="muted" style="margin-top:-6px">청과 매장 재고·발주 도우미</p>
+{% if error %}<div class="alert">{{ error }}</div>{% endif %}
+<div class="card">
+  {% if auth.google_enabled %}
+    <a class="btn block" href="/login/google">구글 계정으로 로그인</a>
+    <p class="muted" style="margin-bottom:0">가게 사장님이 멤버로 추가한 구글 계정으로 로그인하면 그 가게 화면이 열려요.</p>
+  {% else %}
+    <p style="margin-top:0">구글 로그인이 아직 설정되지 않았어요.</p>
+    <p class="muted" style="margin-bottom:0">.env에 GOOGLE_CLIENT_ID와 GOOGLE_CLIENT_SECRET을 넣으면 켜져요.</p>
+  {% endif %}
+</div>
+{% if auth.dev_login %}
+<div class="card">
+  <b>개발용 로그인</b>
+  <p class="muted" style="margin:4px 0 8px">PC에서 확인할 때만 쓰는 로그인이에요. 이메일만 넣으면 들어가져요.</p>
+  <form method="post" action="/login/dev" class="row">
+    <input type="email" name="email" placeholder="you@gmail.com" required style="flex:1; min-width:180px">
+    <button class="btn small">들어가기</button>
+  </form>
+</div>
+{% endif %}
+{% endblock %}

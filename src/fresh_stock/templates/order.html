@@ -16,6 +16,16 @@
   {% for text in similar %}<pre class="msg" style="margin-top:8px">{{ text }}</pre>{% endfor %}
 </details>
 {% endif %}
+{% if researched %}
+<details class="card" open><summary><b>AI가 확인한 메모</b> <span class="muted">· {{ researched | length }}개</span></summary>
+  {% for n in researched %}
+    <div style="margin-top:8px"><b>{{ n.day | day }}</b> {{ n.text }}<br>
+      <span class="{{ 'reason' if n.research.confirmed else 'flags' }}">{{ 'AI 확인' if n.research.confirmed else 'AI가 확인하지 못함' }}: {{ n.research.summary }}</span>
+      {% for title, url in n.research.sources %}<br><a href="{{ url }}" target="_blank" rel="noopener">{{ title }}</a>{% endfor %}
+    </div>
+  {% endfor %}
+</details>
+{% endif %}
 <div class="card"><b>발주 에이전트</b><div>{{ plan.summary }}</div>
   <div class="muted" style="margin-top:6px">
     {% if changed %}평소 추천에서 수량이 바뀐 품목:
