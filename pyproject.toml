@@ -3,7 +3,9 @@ name = "fresh-stock"
 version = "0.1.0"
 description = "AI agent for fresh produce stores: handwritten inventory sheets to daily orders."
 requires-python = ">=3.12"
-dependencies = []
+dependencies = [
+    "pillow>=12.3.0",
+]
 
 [project.scripts]
 fresh-stock = "fresh_stock.cli:main"

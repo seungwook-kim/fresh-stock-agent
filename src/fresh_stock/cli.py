@@ -4,6 +4,7 @@
     fresh-stock compare --days 90
     fresh-stock compare --days 30 --policies seasonal,agent
     fresh-stock messages --date 2026-09-21 --llm
+    fresh-stock eval-sheets --n 10
 """
 
 import argparse
@@ -17,6 +18,7 @@ from .llm import ClaudeCodeClient
 from .market_calendar import MarketCalendar
 from .messages import LLMGreetingWriter, build_messages
 from .ordering import POLICIES, OrderPolicy
+from .sheet_eval import build_cases, run_eval, summarize
 from .simulator import SimulationResult, Summary, run_simulation
 
 POLICY_NAMES = [*POLICIES, AgentPolicy.name]
@@ -76,6 +78,29 @@ def _print_messages(args: argparse.Namespace) -> None:
         print(f"===== {m.supplier.name} ({m.supplier.channel}) · 인사말: {m.greeting_source} =====")
         print(m.text)
         print()
+
+
+def _eval_sheets(args: argparse.Namespace) -> None:
+    result = _run(args, "seasonal")
+    cases = build_cases(result, args.n, args.seed)
+    if args.dry_run:
+        args.out.mkdir(parents=True, exist_ok=True)
+        for case in cases:
+            (args.out / f"{case.day}.jpg").write_bytes(case.image)
+        print(f"재고표 이미지 {len(cases)}장 저장: {args.out.resolve()}")
+        return
+    llm = ClaudeCodeClient(model=args.model, effort=args.effort, log_path=args.llm_log)
+    scores = run_eval(llm, result.catalog, cases, args.out, args.workers)
+    print(f"합성 재고표 인식 평가 (모델 {args.model}, 추론 강도 {args.effort})\n")
+    for label, value in summarize(scores).items():
+        print(f"{label:<24}{value:.1%}" if isinstance(value, float) else f"{label:<24}{value}")
+    calls = llm.calls
+    if calls:
+        print(
+            f"\nLLM 호출 {len(calls)}회, 평균 {sum(c.seconds for c in calls) / len(calls):.1f}초, "
+            f"입력 {sum(c.input_tokens for c in calls):,} / 출력 {sum(c.output_tokens for c in calls):,} 토큰"
+        )
+    print(f"장별 결과: {args.out.resolve()}")
 
 
 def _won(v: int) -> str:
@@ -170,8 +195,17 @@ def main() -> None:
     msg.add_argument("--llm", action="store_true", help="문자·전화 거래처에 Claude가 쓴 인사말을 덧붙인다")
     _add_sim_args(msg)
 
+    ev = sub.add_parser("eval-sheets", help="합성 재고표 이미지로 사진 인식 정확도를 잰다")
+    ev.add_argument("--n", type=int, default=10, help="재고표 장 수")
+    ev.add_argument("--workers", type=int, default=3, help="동시에 읽을 장 수")
+    ev.add_argument("--out", type=Path, default=Path("out/eval_sheets"))
+    ev.add_argument("--dry-run", action="store_true", help="이미지만 만들고 인식은 하지 않는다")
+    _add_sim_args(ev)
+
     args = parser.parse_args()
-    if args.command == "messages":
+    if args.command == "eval-sheets":
+        _eval_sheets(args)
+    elif args.command == "messages":
         _print_messages(args)
     elif args.command == "simulate":
         result = _run(args, args.policy)
