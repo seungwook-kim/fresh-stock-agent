@@ -65,6 +65,7 @@ def create_app(service: StoreService) -> FastAPI:
             notes=service.store.notes(start=day),
             revenue=service.revenue(days=7),
             corrections=service.store.correction_stats(),
+            aliases=service.learned_aliases(),
             last_plan=last_plan,
             default_note_day=(day + timedelta(days=1)).isoformat(),
         )

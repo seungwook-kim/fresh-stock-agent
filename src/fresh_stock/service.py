@@ -75,12 +75,31 @@ class StoreService:
         }
         return max_possible, expected
 
+    def learned_aliases(self) -> dict[str, str]:
+        """확인 화면에서 사람이 확정한 기록으로 익힌 이 매장의 줄임말 (적힌 이름 → 품목 id)."""
+        known = {i.id for i in self.catalog.items}
+        aliases = {}
+        for raw, item_id in self.store.confirmed_names().items():
+            if item_id not in known:
+                continue
+            # 정식 이름 그대로이거나, 숫자·지운 자국이 섞인 긴 글자는 줄임말로 쓰지 않는다
+            if raw == self.catalog.item(item_id).name or not raw or len(raw) > 8 or any(c.isdigit() for c in raw):
+                continue
+            aliases[raw] = item_id
+        return aliases
+
     def read_sheet(self, day: date, image: bytes, media_type: str = "image/jpeg") -> list[SheetRowRecord]:
         if self.llm_factory is None:
             raise RuntimeError("재고표를 읽으려면 LLM이 필요합니다.")
         max_possible, expected = self.sheet_bounds(day)
         rows = recognize_sheet(
-            self.llm_factory(), ImageInput(image, media_type), self.catalog, max_possible, expected, f"sheet {day}"
+            self.llm_factory(),
+            ImageInput(image, media_type),
+            self.catalog,
+            max_possible,
+            expected,
+            f"sheet {day}",
+            aliases=self.learned_aliases(),
         )
         records = [
             SheetRowRecord(n, r.raw_name, r.raw_qty, r.item_id, r.qty, tuple(r.flags), None, None)

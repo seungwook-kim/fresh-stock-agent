@@ -242,6 +242,17 @@ class Store:
                 [(iid, q, day.isoformat(), idx) for idx, (iid, q) in finals.items()],
             )
 
+    def confirmed_names(self) -> dict[str, str]:
+        """재고표에 적힌 이름 → 사람이 확정한 품목 id. 같은 이름이 여러 품목으로 확정됐으면 가장 많은 쪽."""
+        rows = self.conn.execute(
+            "SELECT raw_name, item_id_final, COUNT(*) AS n FROM sheet_row"
+            " WHERE item_id_final IS NOT NULL GROUP BY raw_name, item_id_final ORDER BY n DESC"
+        ).fetchall()
+        names: dict[str, str] = {}
+        for raw, item_id, _ in rows:
+            names.setdefault(raw.strip(), item_id)
+        return names
+
     def correction_stats(self) -> dict[str, int]:
         """사람이 확정한 재고표 줄 중 모델이 읽은 값과 달랐던 줄 수. 실제 인식률 추적용."""
         total, changed, flagged_changed = self.conn.execute(

@@ -78,6 +78,7 @@ class FakeVisionLLM:
 
     def generate_json(self, system, prompt, schema, purpose="", images=()):
         self.images = images
+        self.prompt = prompt
         return {"rows": self.rows}
 
 
@@ -137,3 +138,20 @@ def test_render_sheet_is_deterministic():
     assert a == b and a[:2] == b"\xff\xd8"  # JPEG
     assert truth.written["tomato"] == 4.5
     assert all(parse_qty(e.raw_qty) == e.qty for e in truth.entries)
+
+
+def test_learned_aliases_fill_and_check_items():
+    llm = FakeVisionLLM(
+        [
+            _read("샤머", "1", ""),  # 모델이 못 찾은 줄임말
+            _read("방토", "2", "tomato"),  # 확인된 줄임말(방울토마토)과 다르게 매칭
+            _read("사과", "3", "apple"),
+        ]
+    )
+    rows = recognize_sheet(
+        llm, ImageInput(b"jpg"), catalog, aliases={"샤머": "shine_muscat", "방토": "cherry_tomato"}
+    )
+    assert "방토=방울토마토(cherry_tomato)" in llm.prompt
+    assert rows[0].item_id == "shine_muscat" and rows[0].flags == []
+    assert rows[1].item_id == "tomato" and rows[1].flags == ["확인된 줄임말(방울토마토)과 다름"]
+    assert rows[2].flags == []

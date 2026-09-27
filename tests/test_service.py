@@ -134,3 +134,13 @@ def test_demo_closing_is_possible(demo):
     max_possible, _ = service.sheet_bounds(day)
     closing = demo_closing(service, day, seed=3)
     assert all(0 <= q <= max_possible[i] for i, q in closing.items())
+
+
+def test_confirmed_names_become_aliases(demo):
+    store, day = demo
+    llm = FakeLLM(sheet_rows=[_row("방토", "2", ""), _row("사과", "1", "apple"), _row("토마 용 4반", "4반", "tomato")])
+    service = _service(store, llm)
+    service.read_sheet(day, b"jpg")
+    service.confirm_sheet(day, {0: ("cherry_tomato", 2.0), 1: ("apple", 1.0), 2: ("tomato", 4.5)}, 0, 0)
+    # 정식 이름(사과)과 숫자가 섞인 글자(토마 용 4반)는 줄임말로 쓰지 않는다
+    assert service.learned_aliases() == {"방토": "cherry_tomato"}

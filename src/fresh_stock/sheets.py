@@ -55,6 +55,32 @@ ALIASES = {
 }
 
 
+# 그 가게만 아는 한 글자 약어. 다른 품목과 헷갈려서 모델이 추측할 수 없다 (양: 양파/양배추, 사: 사과/사각두부)
+STORE_ABBREVIATIONS = {
+    "양배추": "양",
+    "방울토마토": "방",
+    "사각두부": "사",
+    "손두부": "손",
+    "청양고추": "청",
+    "샤인머스캣": "샤",
+    "블루베리": "블",
+    "느타리": "느",
+    "대파": "파",
+    "새송이": "새",
+    "메추리알": "메",
+    "칼국수면": "칼",
+}
+
+
+def synthetic_aliases(catalog: Catalog, store_abbr: bool = False) -> dict[str, str]:
+    """합성 재고표에 쓰이는 줄임말 전체. 줄임말을 이미 익힌 상태를 흉내 낼 때 쓴다."""
+    by_name = {i.name: i.id for i in catalog.items}
+    aliases = {alias: by_name[name] for name, names in ALIASES.items() for alias in names if name in by_name}
+    if store_abbr:
+        aliases.update({abbr: by_name[name] for name, abbr in STORE_ABBREVIATIONS.items() if name in by_name})
+    return aliases
+
+
 @dataclass(frozen=True)
 class SheetEntry:
     item_id: str
@@ -101,7 +127,7 @@ def _qty_text(item: Item, qty: float, rng: random.Random) -> str:
 
 
 def _entries(
-    catalog: Catalog, closing: dict[str, float], rng: random.Random
+    catalog: Catalog, closing: dict[str, float], rng: random.Random, store_abbr: bool = False
 ) -> tuple[list[SheetEntry], list[str]]:
     entries, omitted = [], []
     for item in catalog.items:
@@ -110,7 +136,9 @@ def _entries(
             omitted.append(item.id)
             continue
         name = item.name
-        if name in ALIASES and rng.random() < 0.5:
+        if store_abbr and name in STORE_ABBREVIATIONS:
+            name = STORE_ABBREVIATIONS[name]
+        elif name in ALIASES and rng.random() < 0.5:
             name = rng.choice(ALIASES[name])
         raw_qty = rng.choice(["0", "x", "-"]) if qty == 0 else _qty_text(item, qty, rng)
         entries.append(SheetEntry(item.id, qty, name, raw_qty, corrected=rng.random() < 0.05))
@@ -118,9 +146,9 @@ def _entries(
 
 
 def render_sheet(
-    catalog: Catalog, day: date, closing: dict[str, float], seed: int
+    catalog: Catalog, day: date, closing: dict[str, float], seed: int, store_abbr: bool = False
 ) -> tuple[bytes, SheetTruth]:
-    """마감 재고를 손글씨 재고표 JPEG로 그린다."""
+    """마감 재고를 손글씨 재고표 JPEG로 그린다. store_abbr이면 매장 고유 약어를 쓴다."""
     rng = random.Random(seed)
     fonts = ensure_fonts()
     font_path = rng.choice(fonts)
@@ -129,7 +157,7 @@ def render_sheet(
     title_font = ImageFont.truetype(str(font_path), size + 8)
     ink = rng.choice([(25, 25, 30), (20, 35, 95), (40, 40, 40)])
 
-    entries, omitted = _entries(catalog, closing, rng)
+    entries, omitted = _entries(catalog, closing, rng, store_abbr)
     columns = 3
     per_col = -(-len(entries) // columns)
     row_h = int(size * 1.55)

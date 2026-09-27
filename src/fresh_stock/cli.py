@@ -22,6 +22,7 @@ from .market_calendar import MarketCalendar
 from .messages import LLMGreetingWriter, build_messages
 from .ordering import POLICIES, OrderPolicy
 from .sheet_eval import build_cases, run_eval, summarize
+from .sheets import synthetic_aliases
 from .simulator import SimulationResult, Summary, run_simulation
 
 POLICY_NAMES = [*POLICIES, AgentPolicy.name]
@@ -95,7 +96,7 @@ def _print_messages(args: argparse.Namespace) -> None:
 
 def _eval_sheets(args: argparse.Namespace) -> None:
     result = _run(args, "seasonal")
-    cases = build_cases(result, args.n, args.seed)
+    cases = build_cases(result, args.n, args.seed, args.store_abbr)
     if args.dry_run:
         args.out.mkdir(parents=True, exist_ok=True)
         for case in cases:
@@ -103,7 +104,8 @@ def _eval_sheets(args: argparse.Namespace) -> None:
         print(f"재고표 이미지 {len(cases)}장 저장: {args.out.resolve()}")
         return
     llm = _llm(args)
-    scores = run_eval(llm, result.catalog, cases, args.out, args.workers)
+    aliases = synthetic_aliases(result.catalog, args.store_abbr) if args.with_aliases else None
+    scores = run_eval(llm, result.catalog, cases, args.out, args.workers, aliases)
     print(f"합성 재고표 인식 평가 ({args.backend}, 모델 {llm.model}, 추론 강도 {args.effort})\n")
     for label, value in summarize(scores).items():
         print(f"{label:<24}{value:.1%}" if isinstance(value, float) else f"{label:<24}{value}")
@@ -270,6 +272,8 @@ def main() -> None:
     ev.add_argument("--workers", type=int, default=3, help="동시에 읽을 장 수")
     ev.add_argument("--out", type=Path, default=Path("out/eval_sheets"))
     ev.add_argument("--dry-run", action="store_true", help="이미지만 만들고 인식은 하지 않는다")
+    ev.add_argument("--with-aliases", action="store_true", help="줄임말을 이미 익힌 상태로 읽는다")
+    ev.add_argument("--store-abbr", action="store_true", help="매장 고유 한 글자 약어(양=양배추 등)로 재고표를 쓴다")
     _add_sim_args(ev)
 
     srv = sub.add_parser("serve", help="모바일 웹 화면을 띄운다")

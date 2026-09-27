@@ -77,7 +77,7 @@ class SheetCase:
     expected: dict[str, float]
 
 
-def build_cases(result: SimulationResult, n: int, seed: int) -> list[SheetCase]:
+def build_cases(result: SimulationResult, n: int, seed: int, store_abbr: bool = False) -> list[SheetCase]:
     """시뮬레이션 기록에서 n일을 골라 재고표 이미지를 만든다."""
     ledger = result.ledger
     sales = regular_sales_series(ledger, result.catalog)
@@ -87,7 +87,7 @@ def build_cases(result: SimulationResult, n: int, seed: int) -> list[SheetCase]:
         if len(cases) == n:
             break
         rec, prev = ledger[idx], ledger[idx - 1]
-        image, truth = render_sheet(result.catalog, rec.day, rec.closing, seed=seed * 1000 + k)
+        image, truth = render_sheet(result.catalog, rec.day, rec.closing, seed=seed * 1000 + k, store_abbr=store_abbr)
         max_possible = {
             i.id: prev.closing.get(i.id, 0) + rec.received.get(i.id, 0) for i in result.catalog.items
         }
@@ -100,7 +100,12 @@ def build_cases(result: SimulationResult, n: int, seed: int) -> list[SheetCase]:
 
 
 def run_eval(
-    llm: LLMClient, catalog: Catalog, cases: list[SheetCase], out: Path, workers: int = 3
+    llm: LLMClient,
+    catalog: Catalog,
+    cases: list[SheetCase],
+    out: Path,
+    workers: int = 3,
+    aliases: dict[str, str] | None = None,
 ) -> list[SheetScore]:
     out.mkdir(parents=True, exist_ok=True)
 
@@ -108,7 +113,13 @@ def run_eval(
         (out / f"{case.day}.jpg").write_bytes(case.image)
         try:
             rows = recognize_sheet(
-                llm, ImageInput(case.image), catalog, case.max_possible, case.expected, purpose=f"sheet {case.day}"
+                llm,
+                ImageInput(case.image),
+                catalog,
+                case.max_possible,
+                case.expected,
+                purpose=f"sheet {case.day}",
+                aliases=aliases,
             )
         except LLMError as e:
             (out / f"{case.day}.json").write_text(json.dumps({"error": str(e)}, ensure_ascii=False), encoding="utf-8")

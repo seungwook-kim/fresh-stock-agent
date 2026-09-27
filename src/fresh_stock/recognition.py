@@ -132,10 +132,21 @@ def recognize_sheet(
     max_possible: dict[str, float] | None = None,
     expected: dict[str, float] | None = None,
     purpose: str = "sheet",
+    aliases: dict[str, str] | None = None,
 ) -> list[RecognizedRow]:
-    """재고표 사진 한 장을 읽는다. max_possible·expected는 validate 참고."""
+    """재고표 사진 한 장을 읽는다.
+
+    max_possible·expected는 validate 참고. aliases는 이 매장에서 사람이 확인한 "적힌 이름 → 품목 id"다.
+    Claude에게 알려주고, 결과도 코드로 대조한다.
+    """
+    aliases = aliases or {}
+    known = {i.id for i in catalog.items}
     items = "\n".join(f"{i.id} | {i.name} | {i.unit}" for i in catalog.items)
-    prompt = f"품목 목록 (id | 이름 | 단위):\n{items}\n\n사진 속 재고표를 읽어라."
+    prompt = f"품목 목록 (id | 이름 | 단위):\n{items}\n\n"
+    if aliases:
+        pairs = ", ".join(f"{raw}={catalog.item(i).name}({i})" for raw, i in sorted(aliases.items()) if i in known)
+        prompt += f"이 매장에서 쓰는 줄임말 (사람이 확인함): {pairs}\n\n"
+    prompt += "사진 속 재고표를 읽어라."
     resp = llm.generate_json(READ_SYSTEM_PROMPT, prompt, READ_SCHEMA, purpose=purpose, images=(image,))
     rows = []
     for r in resp["rows"]:
@@ -150,6 +161,12 @@ def recognize_sheet(
             row.flags.append("글씨가 애매함")
         if r["corrected"]:
             row.flags.append("고쳐 쓴 칸")
+        learned = aliases.get(row.raw_name.strip())
+        if learned in known:
+            if row.item_id not in known:
+                row.item_id = learned  # 모델이 못 찾은 품목을 확인된 줄임말로 채운다
+            elif row.item_id != learned:
+                row.flags.append(f"확인된 줄임말({catalog.item(learned).name})과 다름")
         rows.append(row)
     validate(rows, catalog, max_possible, expected)
     return rows

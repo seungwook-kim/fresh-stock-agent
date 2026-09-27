@@ -55,5 +55,9 @@
   {% for label, value in corrections.items() %}
     <div class="row" style="justify-content:space-between"><span>{{ label }}</span><b>{{ value }}</b></div>
   {% endfor %}
+  <div style="margin-top:10px"><b>익힌 줄임말 {{ aliases | length }}개</b>
+    <span class="muted">· 다음 재고표부터 Claude에게 알려주고, 결과와 다르면 표시해요</span></div>
+  {% if aliases %}<p class="muted" style="margin:4px 0 0">
+    {% for raw, item_id in aliases | dictsort %}{{ raw }} → {{ catalog.item(item_id).name }}{{ ', ' if not loop.last }}{% endfor %}</p>{% endif %}
 </div>
 {% endblock %}
