@@ -18,6 +18,15 @@ from .simulator import run_simulation
 from .store import OrderLineRecord, OrderPlan, Store
 
 
+def _note_source(text: str) -> str:
+    """시뮬레이션 메모의 출처. 날씨·명절은 자동 메모, TV 방송 이야기는 사장님이 적은 메모로 본다."""
+    if text.startswith(("비 예보", "폭염")):
+        return "날씨"
+    if "명절" in text or "연휴" in text:
+        return "명절"
+    return "사장님"
+
+
 def seed_demo(store: Store, catalog: Catalog, calendar: MarketCalendar, start: date, days: int, seed: int) -> date:
     """days일치 기록과 그 발주를 넣는다. 돌려주는 날짜가 재고표를 입력할 첫날이다."""
     # 하루 더 돌려서 마지막 날 저녁 발주(다음 날 입고분)까지 만든다
@@ -52,12 +61,12 @@ def seed_demo(store: Store, catalog: Catalog, calendar: MarketCalendar, start: d
     for d, notes in sorted(result.notes.items()):
         if d < first_open:
             for text in notes:
-                store.add_note(d, text)
+                store.add_note(d, text, source=_note_source(text))
 
     # 앞으로 며칠 동안의 가게 메모
     tv_item = random.Random(seed).choice([i for i in catalog.items if i.category == "야채"])
     store.add_note(first_open + timedelta(days=1), f"어제 저녁 TV 건강 프로그램에서 {tv_item.name} 효능 소개 (손님 문의 많을 듯)")
-    store.add_note(first_open + timedelta(days=2), "비 예보 (강수확률 80%)")
+    store.add_note(first_open + timedelta(days=2), "비 예보 (강수확률 80%)", source="날씨")
     return first_open
 
 

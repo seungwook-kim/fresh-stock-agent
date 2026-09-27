@@ -164,3 +164,10 @@ def test_agent_gets_similar_past_days(demo):
     service.plan_for(day)
     order_prompt = next(p for c, p in zip(llm.calls, llm.prompts) if c.startswith("order"))
     assert "[과거 비슷한 날]" in order_prompt
+
+
+def test_demo_notes_have_sources(demo):
+    store, _ = demo
+    sources = {n.text: n.source for n in store.note_records()}
+    assert sources["비 예보 (강수확률 80%)"] == "날씨"
+    assert any(src == "사장님" and "효능" in text for text, src in sources.items())
