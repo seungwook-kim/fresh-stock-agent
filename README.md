@@ -48,7 +48,7 @@ flowchart LR
 
 ```bash
 uv sync
-uv run fresh-stock serve --demo        # http://127.0.0.1:8000 모바일 웹 (가상 매장 기록 60일을 넣고 시작)
+uv run fresh-stock serve --demo        # 모바일 웹 (가상 매장 기록 60일을 넣고 시작). 8799번부터 빈 포트를 찾아 주소를 알려준다
 uv run pytest                          # 테스트 83개
 ```
 

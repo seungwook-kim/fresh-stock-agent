@@ -11,6 +11,7 @@
 import argparse
 import csv
 import os
+import socket
 from datetime import date
 from pathlib import Path
 
@@ -123,6 +124,15 @@ def _serve(args: argparse.Namespace) -> None:
     from .store import Store
     from .web import create_app
 
+    if args.port is None:
+        port = _free_port(args.host, DEFAULT_PORT)
+        if port is None:
+            raise SystemExit(f"{DEFAULT_PORT}번부터 빈 포트를 찾지 못했습니다. --port로 지정해 주세요.")
+    elif _port_in_use(args.host, args.port):
+        raise SystemExit(f"{args.port}번 포트를 다른 프로그램이 쓰고 있습니다. --port를 빼면 빈 포트를 찾아 씁니다.")
+    else:
+        port = args.port
+
     store = Store(args.db)
     catalog, calendar = load_catalog(), MarketCalendar()
     if args.demo and store.last_closed_day() is None:
@@ -133,8 +143,34 @@ def _serve(args: argparse.Namespace) -> None:
         return _llm(args)
 
     app = create_app(StoreService(store, catalog, calendar, llm_factory, args.store_name))
-    print(f"http://{args.host}:{args.port} 에서 열립니다.")
-    uvicorn.run(app, host=args.host, port=args.port, log_level="warning")
+    print(f"http://{args.host}:{port} 에서 열립니다.", flush=True)
+    uvicorn.run(app, host=args.host, port=port, log_level="warning")
+
+
+DEFAULT_PORT = 8799
+
+
+def _port_in_use(host: str, port: int) -> bool:
+    """이미 쓰이는 포트인지 본다.
+
+    Windows는 같은 포트를 다른 주소(0.0.0.0과 127.0.0.1)로 겹쳐 열 수 있어서, 열 수 있는지(bind)만 보면
+    다른 서버와 겹칠 수 있다. 접속이 되는지도 함께 본다.
+    """
+    try:
+        with socket.create_connection(("127.0.0.1" if host == "0.0.0.0" else host, port), timeout=0.3):
+            return True
+    except OSError:
+        pass
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        try:
+            s.bind((host, port))
+        except OSError:
+            return True
+    return False
+
+
+def _free_port(host: str, start: int, tries: int = 50) -> int | None:
+    return next((p for p in range(start, start + tries) if not _port_in_use(host, p)), None)
 
 
 def _won(v: int) -> str:
@@ -241,7 +277,7 @@ def main() -> None:
     srv.add_argument("--demo", action="store_true", help="빈 DB면 시뮬레이션 기록을 넣고 시작한다")
     srv.add_argument("--store-name", default="우리가게")
     srv.add_argument("--host", default="127.0.0.1")
-    srv.add_argument("--port", type=int, default=8000)
+    srv.add_argument("--port", type=int, default=None, help="지정하지 않으면 8799번부터 빈 포트를 찾아 쓴다")
     _add_sim_args(srv)
     srv.set_defaults(days=60, llm_log=Path("out/llm_web.jsonl"))
 
