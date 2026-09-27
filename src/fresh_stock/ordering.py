@@ -4,7 +4,7 @@
 """
 
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date
 from functools import cached_property
 from statistics import mean, median
@@ -26,6 +26,7 @@ class OrderContext:
     ledger: list[DayRecord]  # 오늘까지의 기록
     catalog: Catalog
     calendar: MarketCalendar
+    notes: dict[date, list[str]] = field(default_factory=dict)  # 버틸 날들에 대해 가게가 미리 아는 일
 
     def stock(self, item_id: str) -> float:
         return self.ledger[-1].closing.get(item_id, 0.0) if self.ledger else 0.0

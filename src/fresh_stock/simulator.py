@@ -12,6 +12,7 @@ from datetime import date, timedelta
 
 from .accounting import DayRecord
 from .catalog import Catalog
+from .events import StoreEvent, generate_events
 from .market_calendar import MarketCalendar
 from .ordering import OrderContext, OrderPolicy, check_order
 
@@ -102,16 +103,20 @@ class SimulationResult:
 
 
 def generate_demand(
-    catalog: Catalog, calendar: MarketCalendar, days: list[date], seed: int
+    catalog: Catalog, calendar: MarketCalendar, days: list[date], seed: int, events: list[StoreEvent] = ()
 ) -> dict[date, dict[str, float]]:
     rng = random.Random(seed)
     demand = {}
     for d in days:
         factor = WEEKDAY_FACTOR[d.weekday()] * (MARKET_DAY_FACTOR if calendar.is_market_day(d) else 1.0)
+        todays = [e for e in events if e.day == d]
         demand[d] = {}
         for item in catalog.items:
             mu = item.base_demand * factor
-            demand[d][item.id] = round(max(0.0, rng.gauss(mu, mu * DEMAND_CV)), 1)
+            qty = max(0.0, rng.gauss(mu, mu * DEMAND_CV))
+            for e in todays:
+                qty = e.adjust(item, qty)
+            demand[d][item.id] = round(qty, 1)
     return demand
 
 
@@ -133,9 +138,14 @@ def run_simulation(
     seed: int = 42,
     typo_rate: float = 0.005,
     guardrail: bool = True,
+    with_events: bool = True,
 ) -> SimulationResult:
     dates = [start + timedelta(days=i) for i in range(days)]
-    demand = generate_demand(catalog, calendar, dates, seed)
+    events = generate_events(catalog, dates, seed) if with_events else []
+    demand = generate_demand(catalog, calendar, dates, seed, events)
+    notes: dict[date, list[str]] = defaultdict(list)
+    for e in events:
+        notes[e.day].append(e.note)
     pay_rng = random.Random(seed + 1)
     result = SimulationResult(policy=policy, catalog=catalog)
 
@@ -181,13 +191,15 @@ def run_simulation(
         arrival = d + timedelta(days=1)
         if arrival > dates[-1] or not calendar.is_supply_day(arrival):
             continue
+        cover_days = calendar.cover_days(arrival)
         ctx = OrderContext(
             today=d,
             arrival=arrival,
-            cover_days=calendar.cover_days(arrival),
+            cover_days=cover_days,
             ledger=list(result.ledger),
             catalog=catalog,
             calendar=calendar,
+            notes={c: notes[c] for c in cover_days if notes.get(c)},
         )
         proposed = policy.decide(ctx)
         for item in catalog.items:

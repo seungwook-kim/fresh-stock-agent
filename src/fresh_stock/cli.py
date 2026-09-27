@@ -2,6 +2,7 @@
 
     fresh-stock simulate --policy seasonal --days 90 --out out/
     fresh-stock compare --days 90
+    fresh-stock compare --days 30 --policies seasonal,agent
 """
 
 import argparse
@@ -9,10 +10,14 @@ import csv
 from datetime import date
 from pathlib import Path
 
+from .agent import AgentPolicy
 from .catalog import load_catalog
+from .llm import ClaudeCodeClient
 from .market_calendar import MarketCalendar
-from .ordering import POLICIES
+from .ordering import POLICIES, OrderPolicy
 from .simulator import SimulationResult, Summary, run_simulation
+
+POLICY_NAMES = [*POLICIES, AgentPolicy.name]
 
 
 def _add_sim_args(p: argparse.ArgumentParser) -> None:
@@ -21,18 +26,29 @@ def _add_sim_args(p: argparse.ArgumentParser) -> None:
     p.add_argument("--seed", type=int, default=42)
     p.add_argument("--typo-rate", type=float, default=0.005, help="발주 입력 실수 확률 (줄마다)")
     p.add_argument("--no-guardrail", action="store_true", help="발주 수량 경고를 끈다")
+    p.add_argument("--no-events", action="store_true", help="가게 메모(날씨·명절·단체 주문)를 끈다")
+    p.add_argument("--model", default="sonnet", help="에이전트가 쓸 Claude 모델 (Claude Code 모델 이름)")
+    p.add_argument("--effort", default="low", help="에이전트 추론 강도 (low, medium, high, xhigh, max)")
+    p.add_argument("--llm-log", type=Path, default=Path("out/llm_calls.jsonl"), help="LLM 호출 기록 (JSONL)")
+
+
+def _make_policy(name: str, args: argparse.Namespace) -> OrderPolicy:
+    if name == AgentPolicy.name:
+        return AgentPolicy(ClaudeCodeClient(model=args.model, effort=args.effort, log_path=args.llm_log))
+    return POLICIES[name]()
 
 
 def _run(args: argparse.Namespace, policy_name: str) -> SimulationResult:
     return run_simulation(
         catalog=load_catalog(),
         calendar=MarketCalendar(),
-        policy=POLICIES[policy_name](),
+        policy=_make_policy(policy_name, args),
         start=args.start,
         days=args.days,
         seed=args.seed,
         typo_rate=args.typo_rate,
         guardrail=not args.no_guardrail,
+        with_events=not args.no_events,
     )
 
 
@@ -56,6 +72,18 @@ def _print_summaries(summaries: list[Summary]) -> None:
     print(" " * 32 + "".join(s.policy.ljust(width) for s in summaries))
     for label, fmt in rows:
         print(label.ljust(32) + "".join(fmt(s).ljust(width) for s in summaries))
+
+
+def _print_agent_stats(results: list[SimulationResult]) -> None:
+    for r in results:
+        if not isinstance(r.policy, AgentPolicy) or not r.policy.llm.calls:
+            continue
+        calls = r.policy.llm.calls
+        print(
+            f"\n에이전트: LLM 호출 {len(calls)}회, 평균 {sum(c.seconds for c in calls) / len(calls):.1f}초, "
+            f"입력 {sum(c.input_tokens for c in calls):,} / 출력 {sum(c.output_tokens for c in calls):,} 토큰, "
+            f"실패 후 규칙으로 대체 {r.policy.failures}회, 조정 {len(r.policy.decisions)}건"
+        )
 
 
 def _write_csv(result: SimulationResult, out: Path) -> None:
@@ -84,18 +112,29 @@ def _write_csv(result: SimulationResult, out: Path) -> None:
             for item in result.catalog.items:
                 i = item.id
                 w.writerow([t.day, item.name, t.demand[i], t.sold[i], t.cleared[i], t.lost[i]])
+    if isinstance(result.policy, AgentPolicy):
+        with open(out / "agent_decisions.csv", "w", newline="", encoding="utf-8-sig") as f:
+            w = csv.writer(f)
+            w.writerow(["발주일", "품목", "규칙 추천", "에이전트", "이유"])
+            for dec in result.policy.decisions:
+                w.writerow([dec.day, names[dec.item_id], dec.base, dec.qty, dec.reason])
+        with open(out / "agent_summaries.csv", "w", newline="", encoding="utf-8-sig") as f:
+            w = csv.writer(f)
+            w.writerow(["발주일", "요약"])
+            w.writerows(result.policy.summaries)
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(prog="fresh-stock")
     sub = parser.add_subparsers(dest="command", required=True)
 
-    sim = sub.add_parser("simulate", help="발주 규칙 하나로 가상 매장을 돌리고 기록을 CSV로 남긴다")
-    sim.add_argument("--policy", choices=POLICIES, default="yesterday")
+    sim = sub.add_parser("simulate", help="발주 방식 하나로 가상 매장을 돌리고 기록을 CSV로 남긴다")
+    sim.add_argument("--policy", choices=POLICY_NAMES, default="yesterday")
     sim.add_argument("--out", type=Path, default=Path("out"))
     _add_sim_args(sim)
 
-    cmp_ = sub.add_parser("compare", help="같은 수요로 발주 규칙들을 비교한다")
+    cmp_ = sub.add_parser("compare", help="같은 수요로 발주 방식들을 비교한다")
+    cmp_.add_argument("--policies", default=",".join(POLICIES), help=f"쉼표로 구분 ({', '.join(POLICY_NAMES)})")
     _add_sim_args(cmp_)
 
     args = parser.parse_args()
@@ -103,6 +142,13 @@ def main() -> None:
         result = _run(args, args.policy)
         _write_csv(result, args.out)
         _print_summaries([result.summary()])
+        _print_agent_stats([result])
         print(f"\n기록 저장: {args.out.resolve()}")
     else:
-        _print_summaries([_run(args, name).summary() for name in POLICIES])
+        names = [n.strip() for n in args.policies.split(",")]
+        unknown = [n for n in names if n not in POLICY_NAMES]
+        if unknown:
+            parser.error(f"알 수 없는 발주 방식: {', '.join(unknown)}")
+        results = [_run(args, name) for name in names]
+        _print_summaries([r.summary() for r in results])
+        _print_agent_stats(results)
