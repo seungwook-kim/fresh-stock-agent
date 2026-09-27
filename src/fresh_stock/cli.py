@@ -70,7 +70,7 @@ def _print_messages(args: argparse.Namespace) -> None:
         llm = ClaudeCodeClient(model=args.model, effort=args.effort, log_path=args.llm_log)
         writer = LLMGreetingWriter(llm, args.store_name)
     messages = build_messages(
-        result.catalog, arrival, {o.item_id: o.final for o in todays}, args.store_name, notes, writer
+        result.catalog, arrival, {o.item_id: o.final for o in todays}, notes, writer
     )
     for m in messages:
         print(f"===== {m.supplier.name} ({m.supplier.channel}) · 인사말: {m.greeting_source} =====")
@@ -166,8 +166,8 @@ def main() -> None:
     msg = sub.add_parser("messages", help="시뮬레이션의 특정 발주일 주문으로 거래처별 발주 문자를 만든다")
     msg.add_argument("--date", type=date.fromisoformat, required=True, help="발주일 (YYYY-MM-DD)")
     msg.add_argument("--policy", choices=POLICY_NAMES, default="seasonal")
-    msg.add_argument("--store-name", default="우리가게")
-    msg.add_argument("--llm", action="store_true", help="인사말과 끝맺음을 Claude로 쓴다")
+    msg.add_argument("--store-name", default="우리가게", help="인사말에 쓸 가게 이름 (--llm일 때)")
+    msg.add_argument("--llm", action="store_true", help="문자·전화 거래처에 Claude가 쓴 인사말을 덧붙인다")
     _add_sim_args(msg)
 
     args = parser.parse_args()

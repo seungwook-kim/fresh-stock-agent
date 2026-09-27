@@ -46,7 +46,9 @@ chive,부추,야채,박스,garak,1,20000,14000,1
 water_parsley,미나리,야채,박스,garak,1,25000,17000,1
 lotus_root,연근,야채,박스,garak,0.5,36000,27000,3
 burdock,우엉,야채,박스,garak,0.5,34000,25000,3
-tofu,두부,기타,모,tofu,40,2000,1200,2
+square_tofu,사각두부,기타,판,tofu,3,20000,13000,2
+hand_tofu,손두부,기타,판,tofu,1.5,30000,20000,2
+soft_tofu,순두부,기타,판,tofu,1,15000,9000,2
 bean_sprout,콩나물,기타,봉,tofu,30,1500,800,1
 mung_sprout,숙주,기타,봉,tofu,15,1500,800,1
 egg,계란,기타,판,egg,15,8000,6200,3

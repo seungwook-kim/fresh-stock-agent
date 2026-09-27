@@ -1,7 +1,12 @@
-"""거래처별 발주 문자 작성.
+"""거래처별 발주 문자·구매 목록 작성.
 
-주문 목록(품목·수량)은 코드가 확정된 발주에서 그대로 찍는다. LLM이 수량을 옮겨 적다 틀릴 일을 없앤다.
-LLM은 거래처별 인사말과 끝맺음만 쓴다. 숫자가 들어가거나 너무 길면 기본 문구로 바꾼다.
+거래처마다 주문하는 방식이 다르다.
+- 문자: "사각두부 2판, 손두부 2판, 순두부 1판"처럼 한 줄로 보낸다
+- 전화: 통화하면서 읽을 메모
+- 구매목록: 가락시장은 지인이 경매로 사 오므로, 분류별로 정리한 종이 목록을 보여준다
+
+품목·수량은 코드가 확정된 발주에서 그대로 찍는다. LLM이 수량을 옮겨 적다 틀릴 일을 없앤다.
+인사말은 선택 기능이다. 켜면 LLM이 인사말과 끝맺음만 쓰고, 숫자가 들어가거나 너무 길면 빼고 보낸다.
 """
 
 import re
@@ -10,11 +15,12 @@ from datetime import date
 from typing import Protocol
 
 from .catalog import Catalog
-from .domain import Item, Supplier
+from .domain import Category, Item, Supplier
 from .llm import LLMClient, LLMError
 
 WEEKDAYS = "월화수목금토일"
 MAX_PHRASE_LEN = 80
+PURCHASE_LIST = "구매목록"
 
 
 @dataclass(frozen=True)
@@ -28,28 +34,34 @@ class OrderMessage:
     supplier: Supplier
     arrival: date
     lines: tuple[tuple[Item, int], ...]
-    greeting: Greeting
-    greeting_source: str  # "llm" 또는 "기본" (LLM 문구가 규칙에 걸려 기본 문구를 쓴 경우 포함)
+    greeting: Greeting | None
+    greeting_source: str  # "없음", "llm", "제외" (LLM 문구가 규칙에 걸림)
 
     @property
     def text(self) -> str:
-        items = "\n".join(f"- {item.name} {qty}{item.unit}" for item, qty in self.lines)
         when = f"{self.arrival.month}월 {self.arrival.day}일({WEEKDAYS[self.arrival.weekday()]}) 입고분"
+        if self.supplier.channel == PURCHASE_LIST:
+            sections = []
+            for category in Category:
+                rows = [f"- {i.name} {q}{i.unit}" for i, q in self.lines if i.category == category]
+                if rows:
+                    sections.append(f"{category}\n" + "\n".join(rows))
+            return f"[{self.supplier.name} 구매 목록] {when}\n\n" + "\n\n".join(sections)
+
+        body = [", ".join(f"{i.name} {q}{i.unit}" for i, q in self.lines)]
+        if self.greeting:
+            body = [self.greeting.opening, *body, self.greeting.closing]
         if self.supplier.channel == "전화":
-            return f"[통화 메모] {self.supplier.name} · {when}\n{self.greeting.opening}\n{items}\n{self.greeting.closing}"
-        return f"{self.greeting.opening}\n{when} 주문드립니다.\n\n{items}\n\n{self.greeting.closing}"
+            body = [f"[통화 메모] {self.supplier.name} · {when}", *body]
+        return "\n".join(body)
 
 
 class GreetingWriter(Protocol):
     def write(
         self, suppliers: list[tuple[Supplier, list[Item]]], arrival: date, notes: list[str]
     ) -> dict[str, Greeting]:
-        """거래처 id별 인사말. 빠진 거래처는 기본 문구를 쓴다."""
+        """거래처 id별 인사말. 빠진 거래처는 인사말 없이 보낸다."""
         ...
-
-
-def default_greeting(store_name: str) -> Greeting:
-    return Greeting(opening=f"사장님 안녕하세요, {store_name}입니다.", closing="감사합니다.")
 
 
 def is_safe_phrase(text: str) -> bool:
@@ -61,7 +73,6 @@ def build_messages(
     catalog: Catalog,
     arrival: date,
     orders: dict[str, int],
-    store_name: str,
     notes: list[str] = (),
     writer: GreetingWriter | None = None,
 ) -> list[OrderMessage]:
@@ -73,17 +84,19 @@ def build_messages(
 
     suppliers = [catalog.supplier(sid) for sid in by_supplier]
     written: dict[str, Greeting] = {}
-    if writer is not None and suppliers:
-        written = writer.write([(s, [i for i, _ in by_supplier[s.id]]) for s in suppliers], arrival, list(notes))
+    texted = [s for s in suppliers if s.channel != PURCHASE_LIST]
+    if writer is not None and texted:
+        written = writer.write([(s, [i for i, _ in by_supplier[s.id]]) for s in texted], arrival, list(notes))
 
-    fallback = default_greeting(store_name)
     messages = []
     for s in suppliers:
         g = written.get(s.id)
-        if g is not None and is_safe_phrase(g.opening) and is_safe_phrase(g.closing):
+        if g is None:
+            greeting, source = None, "없음"
+        elif is_safe_phrase(g.opening) and is_safe_phrase(g.closing):
             greeting, source = g, "llm"
         else:
-            greeting, source = fallback, "기본"
+            greeting, source = None, "제외"
         messages.append(OrderMessage(s, arrival, tuple(by_supplier[s.id]), greeting, source))
     return messages
 
