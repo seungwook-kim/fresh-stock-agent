@@ -62,6 +62,14 @@ def test_validate_flags_problems():
     assert "같은 품목이 두 번 나옴" in flags[6] and "같은 품목이 두 번 나옴" in flags[7]
 
 
+def test_validate_flags_under_read():
+    rows = [_row("shiitake", 1), _row("tomato", 1), _row("kiwi", 5)]
+    validate(rows, catalog, expected={"shiitake": 9.5, "tomato": 2.0, "kiwi": 6.0})
+    assert rows[0].flags == ["예상 재고 10보다 크게 적음"]  # 11봉을 1봉으로 읽은 경우
+    assert rows[1].flags == []  # 차이가 작으면 표시하지 않는다
+    assert rows[2].flags == []
+
+
 class FakeVisionLLM:
     def __init__(self, rows):
         self.rows = rows

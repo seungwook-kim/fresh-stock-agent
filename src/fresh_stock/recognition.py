@@ -15,6 +15,9 @@ UNIT_WORDS = ("박스", "box", "개", "판", "봉", "팩", "단", "모", "b")
 # 손글씨 0은 영문 o나 한글 ㅇ으로 읽히기 쉽다. 수량 칸에서는 0으로 본다
 ZERO_WORDS = {"x", "X", "-", "0", "o", "O", "ㅇ", "없음", "품절"}
 KOREAN_NUMBERS = {"한": 1, "두": 2, "세": 3, "네": 4}
+# 예상 재고보다 이만큼 적으면 "11봉"을 "1봉"으로 읽은 것처럼 적게 읽었을 수 있다
+UNDER_READ_RATIO = 0.25
+UNDER_READ_GAP = 4
 
 READ_SYSTEM_PROMPT = """너는 과일·야채 매장의 손글씨 마감 재고표 사진을 읽는다.
 
@@ -86,8 +89,17 @@ def parse_qty(raw: str) -> float | None:
     return None
 
 
-def validate(rows: list[RecognizedRow], catalog: Catalog, max_possible: dict[str, float] | None = None) -> None:
-    """이상한 줄에 확인 표시를 붙인다."""
+def validate(
+    rows: list[RecognizedRow],
+    catalog: Catalog,
+    max_possible: dict[str, float] | None = None,
+    expected: dict[str, float] | None = None,
+) -> None:
+    """이상한 줄에 확인 표시를 붙인다.
+
+    max_possible: 품목별 어제 재고 + 오늘 입고. 이보다 많으면 불가능한 값이다.
+    expected: 품목별 예상 재고 (max_possible - 최근 평균 판매). 이보다 크게 적으면 적게 읽었을 수 있다.
+    """
     known = {i.id for i in catalog.items}
     seen: dict[str, int] = {}
     for row in rows:
@@ -102,6 +114,10 @@ def validate(rows: list[RecognizedRow], catalog: Catalog, max_possible: dict[str
                 row.flags.append(f"{item.unit} 단위로 맞지 않는 수량")
             if max_possible is not None and row.qty > max_possible.get(row.item_id, 0) + item.count_step:
                 row.flags.append(f"어제 재고와 오늘 입고를 합친 {max_possible.get(row.item_id, 0):g}보다 많음")
+            if expected is not None:
+                e = expected.get(row.item_id, 0)
+                if e - row.qty >= UNDER_READ_GAP and row.qty <= e * UNDER_READ_RATIO:
+                    row.flags.append(f"예상 재고 {e:.0f}보다 크게 적음")
         if row.item_id:
             seen[row.item_id] = seen.get(row.item_id, 0) + 1
     for row in rows:
@@ -114,9 +130,10 @@ def recognize_sheet(
     image: ImageInput,
     catalog: Catalog,
     max_possible: dict[str, float] | None = None,
+    expected: dict[str, float] | None = None,
     purpose: str = "sheet",
 ) -> list[RecognizedRow]:
-    """재고표 사진 한 장을 읽는다. max_possible은 품목별 (어제 재고 + 오늘 입고)로, 불가능한 수량을 잡는 데 쓴다."""
+    """재고표 사진 한 장을 읽는다. max_possible·expected는 validate 참고."""
     items = "\n".join(f"{i.id} | {i.name} | {i.unit}" for i in catalog.items)
     prompt = f"품목 목록 (id | 이름 | 단위):\n{items}\n\n사진 속 재고표를 읽어라."
     resp = llm.generate_json(READ_SYSTEM_PROMPT, prompt, READ_SCHEMA, purpose=purpose, images=(image,))
@@ -134,5 +151,5 @@ def recognize_sheet(
         if r["corrected"]:
             row.flags.append("고쳐 쓴 칸")
         rows.append(row)
-    validate(rows, catalog, max_possible)
+    validate(rows, catalog, max_possible, expected)
     return rows

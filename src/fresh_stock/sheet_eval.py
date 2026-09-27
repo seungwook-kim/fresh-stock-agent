@@ -10,6 +10,7 @@ from dataclasses import asdict, dataclass
 from datetime import date
 from pathlib import Path
 
+from .accounting import regular_sales_series
 from .catalog import Catalog
 from .llm import ImageInput, LLMClient, LLMError
 from .recognition import RecognizedRow, recognize_sheet
@@ -73,11 +74,13 @@ class SheetCase:
     image: bytes
     truth: SheetTruth
     max_possible: dict[str, float]
+    expected: dict[str, float]
 
 
 def build_cases(result: SimulationResult, n: int, seed: int) -> list[SheetCase]:
     """시뮬레이션 기록에서 n일을 골라 재고표 이미지를 만든다."""
     ledger = result.ledger
+    sales = regular_sales_series(ledger, result.catalog)
     step = max(1, (len(ledger) - 1) // n)
     cases = []
     for k, idx in enumerate(range(1, len(ledger), step)):
@@ -88,7 +91,11 @@ def build_cases(result: SimulationResult, n: int, seed: int) -> list[SheetCase]:
         max_possible = {
             i.id: prev.closing.get(i.id, 0) + rec.received.get(i.id, 0) for i in result.catalog.items
         }
-        cases.append(SheetCase(rec.day, image, truth, max_possible))
+        recent = sales[max(0, idx - 7) : idx]
+        expected = {
+            i: max_possible[i] - sum(s.get(i, 0) for s in recent) / len(recent) for i in max_possible
+        }
+        cases.append(SheetCase(rec.day, image, truth, max_possible, expected))
     return cases
 
 
@@ -101,7 +108,7 @@ def run_eval(
         (out / f"{case.day}.jpg").write_bytes(case.image)
         try:
             rows = recognize_sheet(
-                llm, ImageInput(case.image), catalog, case.max_possible, purpose=f"sheet {case.day}"
+                llm, ImageInput(case.image), catalog, case.max_possible, case.expected, purpose=f"sheet {case.day}"
             )
         except LLMError as e:
             (out / f"{case.day}.json").write_text(json.dumps({"error": str(e)}, ensure_ascii=False), encoding="utf-8")
