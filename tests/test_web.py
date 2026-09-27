@@ -63,7 +63,7 @@ def test_home_shows_next_step(app_env):
 
 
 def test_full_day_through_web(app_env):
-    client, service, day, llm = app_env
+    client, service, day, _ = app_env
     r = client.post("/sheet", files={"photo": ("sheet.jpg", b"jpg-bytes", "image/jpeg")}, follow_redirects=True)
     assert r.status_code == 200 and "재고표 확인" in r.text
     assert "품목을 찾지 못함" in r.text and 'class="flag"' in r.text

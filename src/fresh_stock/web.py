@@ -50,7 +50,7 @@ def create_app(service: StoreService) -> FastAPI:
 
     @app.get("/")
     def home(request: Request):
-        step, day = service.status()
+        _, day = service.status()
         last = service.store.last_closed_day()
         last_plan = None
         if last is not None:
@@ -84,7 +84,7 @@ def create_app(service: StoreService) -> FastAPI:
 
     @app.get("/sheet")
     def sheet(request: Request, error: str = ""):
-        step, day = service.status()
+        _, day = service.status()
         return render(request, "sheet.html", day=day, has_rows=bool(service.store.sheet_rows(day)), error=error)
 
     def _read(day: date, image: bytes, media_type: str):

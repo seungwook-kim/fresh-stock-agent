@@ -206,9 +206,16 @@ class Store:
                 "INSERT INTO sheet_row VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 [
                     (
-                        day.isoformat(), r.idx, r.raw_name, r.raw_qty, r.item_id_read, r.qty_read,
-                        json.dumps(list(r.flags), ensure_ascii=False), r.item_id_final, r.qty_final,
-                    )  # fmt: skip
+                        day.isoformat(),
+                        r.idx,
+                        r.raw_name,
+                        r.raw_qty,
+                        r.item_id_read,
+                        r.qty_read,
+                        json.dumps(list(r.flags), ensure_ascii=False),
+                        r.item_id_final,
+                        r.qty_final,
+                    )
                     for r in rows
                 ],
             )

@@ -114,7 +114,7 @@ class ClaudeCodeClient:
         output, error, usage = None, None, {}
         try:
             proc = subprocess.run(
-                cmd, input=stdin, capture_output=True, text=True, encoding="utf-8", timeout=self.timeout
+                cmd, input=stdin, capture_output=True, text=True, encoding="utf-8", timeout=self.timeout, check=False
             )
             data = self._result(proc.stdout)
             usage = data.get("usage", {})
