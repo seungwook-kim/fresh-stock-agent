@@ -121,3 +121,27 @@ def test_notes_add_and_delete(app_env):
     assert "추석 3일 전" in client.get("/").text
     client.post(f"/notes/{note_id}/delete")
     assert all(t != "추석 3일 전" for _, _, t in service.store.notes())
+
+
+def test_llm_log_pages(tmp_path):
+    import json
+
+    log = tmp_path / "llm.jsonl"
+    calls = [
+        {"purpose": "sheet 2026-07-31", "system": "S", "prompt": "품목 목록", "images": 1, "output": {"rows": []},
+         "error": None, "input_tokens": 4000, "output_tokens": 2000, "seconds": 20.5, "at": "2026-07-31T21:00:00"},
+        {"purpose": "order 2026-07-31", "system": "S", "prompt": "가게 메모", "images": 0, "output": None,
+         "error": "timeout", "input_tokens": 0, "output_tokens": 0, "seconds": 300.0, "at": "2026-07-31T21:01:00"},
+    ]  # fmt: skip
+    log.write_text("\n".join(json.dumps(c, ensure_ascii=False) for c in calls) + "\n{broken", encoding="utf-8")
+    store = Store(":memory:")
+    seed_demo(store, catalog, calendar, date(2026, 7, 1), days=30, seed=1)
+    client = TestClient(create_app(StoreService(store, catalog, calendar), llm_log=log))
+    page = client.get("/logs").text
+    assert "재고표 읽기" in page and "발주 에이전트" in page
+    assert "실패: timeout" in page
+    detail = client.get("/logs/0").text  # 최신이 먼저
+    assert "order 2026-07-31" in detail and "가게 메모" in detail
+    assert client.get("/logs/99", follow_redirects=False).status_code == 303
+    empty = TestClient(create_app(StoreService(store, catalog, calendar))).get("/logs").text
+    assert "아직 기록이 없어요" in empty

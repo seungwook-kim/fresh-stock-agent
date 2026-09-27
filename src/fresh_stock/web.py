@@ -3,6 +3,7 @@
     홈 → 재고표 사진 → 확인·수정 → 발주 추천 → 승인 → 거래처 문자
 """
 
+import json
 import random
 from datetime import date, timedelta
 from pathlib import Path
@@ -28,7 +29,21 @@ def _won(v: float) -> str:
     return f"{round(v):,}원"
 
 
-def create_app(service: StoreService) -> FastAPI:
+def read_llm_log(path: Path | None, limit: int = 200) -> list[dict]:
+    """LLM 호출 기록(JSONL)의 최근 limit건. 최신이 앞에 온다."""
+    if path is None or not path.exists():
+        return []
+    lines = path.read_text(encoding="utf-8").splitlines()[-limit:]
+    calls = []
+    for line in lines:
+        try:
+            calls.append(json.loads(line))
+        except json.JSONDecodeError:
+            continue  # 쓰는 중에 읽힌 마지막 줄
+    return calls[::-1]
+
+
+def create_app(service: StoreService, llm_log: Path | None = None) -> FastAPI:
     app = FastAPI(title="fresh-stock")
     templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
     templates.env.filters["day"] = _fmt_day
@@ -241,6 +256,35 @@ def create_app(service: StoreService) -> FastAPI:
         return go(f"/messages?day={day.isoformat()}")
 
     # 거래처 문자 ----------------------------------------------------------------------
+
+    # LLM 호출 기록 --------------------------------------------------------------------
+
+    @app.get("/logs")
+    def logs(request: Request):
+        calls = read_llm_log(llm_log)
+        kinds: dict[str, dict] = {}
+        for c in calls:
+            k = kinds.setdefault(c["purpose"].split(" ")[0] or "기타", {"n": 0, "sec": 0.0, "in": 0, "out": 0, "err": 0})
+            k["n"] += 1
+            k["sec"] += c["seconds"]
+            k["in"] += c["input_tokens"]
+            k["out"] += c["output_tokens"]
+            k["err"] += bool(c["error"])
+        return render(request, "logs.html", calls=calls, kinds=kinds, llm_log=llm_log)
+
+    @app.get("/logs/{n}")
+    def log_detail(request: Request, n: int):
+        calls = read_llm_log(llm_log)
+        if not 0 <= n < len(calls):
+            return go("/logs")
+        call = calls[n]
+        return render(
+            request,
+            "log_detail.html",
+            call=call,
+            n=n,
+            output=json.dumps(call["output"], ensure_ascii=False, indent=2) if call["output"] is not None else "",
+        )
 
     @app.get("/messages")
     def messages(request: Request, day: date, greeting: bool = False):

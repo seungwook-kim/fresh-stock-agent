@@ -58,6 +58,7 @@
   <a href="/" class="{{ 'on' if active == 'home' }}">홈</a>
   <a href="/sheet" class="{{ 'on' if active == 'sheet' }}">마감 재고표</a>
   {% if step == 'order' %}<a href="/order" class="{{ 'on' if active == 'order' }}">발주</a>{% endif %}
+  <a href="/logs" class="{{ 'on' if active == 'logs' }}">LLM 기록</a>
 </nav>
 <main>
 {% block content %}{% endblock %}

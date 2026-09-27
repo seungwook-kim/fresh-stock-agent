@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% set active = "logs" %}
+{% block title %}LLM 기록{% endblock %}
+{% block content %}
+<p><a href="/logs">← LLM 기록</a></p>
+<h1>{{ call.purpose }}</h1>
+<p class="muted" style="margin-top:-6px">{{ call.at or '-' }} · {{ '%.1f' % call.seconds }}초 ·
+  입력 {{ '{:,}'.format(call.input_tokens) }} / 출력 {{ '{:,}'.format(call.output_tokens) }} 토큰
+  {% if call.images %}· 사진 {{ call.images }}장 (원본은 기록하지 않음){% endif %}</p>
+{% if call.error %}<div class="alert">실패: {{ call.error }}</div>{% endif %}
+<h2>받은 결과</h2>
+<pre class="msg">{{ output or '(없음)' }}</pre>
+<h2>보낸 프롬프트</h2>
+<pre class="msg">{{ call.prompt }}</pre>
+<details class="card" style="margin-top:12px"><summary>시스템 프롬프트</summary><pre class="msg">{{ call.system }}</pre></details>
+{% endblock %}

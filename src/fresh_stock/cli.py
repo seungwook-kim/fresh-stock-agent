@@ -179,7 +179,7 @@ def _serve(args: argparse.Namespace) -> None:
         return _llm(args)
 
     memory = None if args.no_rag else _memory()
-    app = create_app(StoreService(store, catalog, calendar, llm_factory, args.store_name, memory))
+    app = create_app(StoreService(store, catalog, calendar, llm_factory, args.store_name, memory), args.llm_log)
     print(f"http://{args.host}:{port} 에서 열립니다.", flush=True)
     uvicorn.run(app, host=args.host, port=port, log_level="warning")
 

@@ -13,6 +13,7 @@ import shutil
 import subprocess
 import threading
 import time
+from datetime import datetime
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Protocol
@@ -43,6 +44,7 @@ class LLMCall:
     input_tokens: int
     output_tokens: int
     seconds: float
+    at: str = ""  # 호출 시각
 
 
 class LLMClient(Protocol):
@@ -136,6 +138,7 @@ class ClaudeCodeClient:
                 + usage.get("cache_read_input_tokens", 0),
                 output_tokens=usage.get("output_tokens", 0),
                 seconds=round(time.monotonic() - started, 2),
+                at=datetime.now().isoformat(timespec="seconds"),
             )
         )
         if error:
@@ -253,6 +256,7 @@ class AnthropicClient:
                               + (usage.cache_read_input_tokens or 0)) if usage else 0,
                 output_tokens=usage.output_tokens if usage else 0,
                 seconds=round(time.monotonic() - started, 2),
+                at=datetime.now().isoformat(timespec="seconds"),
             ),
         )  # fmt: skip
         if error:
