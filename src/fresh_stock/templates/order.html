@@ -11,6 +11,11 @@
   {% for d, texts in notes | dictsort %}{% for t in texts %}<div>{{ d | day }} {{ t }}</div>{% endfor %}{% endfor %}
 </div>
 {% endif %}
+{% if similar %}
+<details class="card"><summary><b>참고한 과거 기록</b> <span class="muted">· 오늘 메모와 비슷한 날 {{ similar | length }}개</span></summary>
+  {% for text in similar %}<pre class="msg" style="margin-top:8px">{{ text }}</pre>{% endfor %}
+</details>
+{% endif %}
 <div class="card"><b>발주 에이전트</b><div>{{ plan.summary }}</div>
   <div class="muted" style="margin-top:6px">
     {% if changed %}평소 추천에서 수량이 바뀐 품목:

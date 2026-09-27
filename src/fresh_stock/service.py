@@ -13,6 +13,7 @@ from .agent import AgentPolicy
 from .catalog import Catalog
 from .llm import ImageInput, LLMClient
 from .market_calendar import MarketCalendar
+from .memory import DayMemoryBank
 from .messages import LLMGreetingWriter, OrderMessage, build_messages
 from .ordering import OrderContext, SeasonalPolicy, check_order
 from .recognition import recognize_sheet
@@ -41,12 +42,14 @@ class StoreService:
         calendar: MarketCalendar,
         llm_factory: Callable[[], LLMClient] | None = None,
         store_name: str = "우리가게",
+        memory: DayMemoryBank | None = None,
     ):
         self.store = store
         self.catalog = catalog
         self.calendar = calendar
         self.llm_factory = llm_factory
         self.store_name = store_name
+        self.memory = memory  # 과거 비슷한 날 검색 (RAG). 없으면 경험 노트만 쓴다
 
     # 지금 할 일 ------------------------------------------------------------------
 
@@ -136,6 +139,9 @@ class StoreService:
         notes: dict[date, list[str]] = {}
         for _, d, text in self.store.notes(cover[0], cover[-1]):
             notes.setdefault(d, []).append(text)
+        note_log: dict[date, list[str]] = {}
+        for _, d, text in self.store.notes(end=day):
+            note_log.setdefault(d, []).append(text)
         return OrderContext(
             today=day,
             arrival=arrival,
@@ -144,6 +150,7 @@ class StoreService:
             catalog=self.catalog,
             calendar=self.calendar,
             notes=notes,
+            note_log=note_log,
         )
 
     def make_plan(self, day: date) -> OrderPlan | None:
@@ -154,7 +161,7 @@ class StoreService:
         base = SeasonalPolicy().decide(ctx)
         decisions = {}
         if ctx.notes and self.llm_factory is not None:
-            agent = AgentPolicy(self.llm_factory())
+            agent = AgentPolicy(self.llm_factory(), memory=self.memory)
             recommended = agent.decide(ctx)
             decisions = {d.item_id: d for d in agent.decisions}
             if agent.summaries:
@@ -174,6 +181,14 @@ class StoreService:
         plan = OrderPlan(day, ctx.arrival, summary, False, tuple(lines))
         self.store.save_plan(plan)
         return plan
+
+    def similar_days(self, day: date) -> list[str]:
+        """발주 화면에 보여줄 과거 비슷한 날 (에이전트가 받은 것과 같은 검색)."""
+        ctx = self.order_context(day)
+        if ctx is None or not ctx.notes or self.memory is None:
+            return []
+        query = " / ".join(n for _, notes in sorted(ctx.notes.items()) for n in notes)
+        return [m.describe(self.catalog, self.calendar) for m in self.memory.search(ctx, query)]
 
     def plan_for(self, day: date) -> OrderPlan | None:
         return self.store.plan(day) or self.make_plan(day)

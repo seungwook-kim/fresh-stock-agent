@@ -13,8 +13,11 @@ from datetime import date, timedelta
 from .catalog import Catalog
 from .domain import Category, Item
 
-# 추석 (음력 8월 15일). 시뮬레이션 기간에 걸리는 해를 추가해 쓴다
-CHUSEOK = {2026: date(2026, 9, 25)}
+# 명절 날짜 (음력). 시뮬레이션 기간에 걸리는 해를 추가해 쓴다
+HOLIDAYS = {
+    "추석": [date(2025, 10, 6), date(2026, 9, 25)],
+    "설날": [date(2026, 2, 17)],
+}
 # 명절 3일 전부터 당일까지 대목. 매출 2~3배, 과일이 특히 많고 야채도 뒤지지 않는다
 HOLIDAY_FACTOR = {Category.FRUIT: 2.7, Category.VEGETABLE: 2.3, Category.OTHER: 2.0}
 HOLIDAY_AFTER_FACTOR = 0.5  # 명절 다음날 (가정값)
@@ -50,15 +53,16 @@ def generate_events(catalog: Catalog, days: list[date], seed: int) -> list[Store
         if rng.random() < RAIN_PROBABILITY:
             events.append(StoreEvent(d, "비 예보 (강수확률 80%)", factor=RAIN_FACTOR))
 
-    for chuseok in CHUSEOK.values():
-        for before in (3, 2, 1, 0):
-            d = chuseok - timedelta(days=before)
-            label = "추석 당일" if before == 0 else f"추석 {before}일 전"
-            for category, factor in HOLIDAY_FACTOR.items():
-                events.append(StoreEvent(d, f"{label} (명절 대목)", factor=factor, category=category))
-        events.append(
-            StoreEvent(chuseok + timedelta(days=1), "추석 다음날 (연휴, 손님 적음)", factor=HOLIDAY_AFTER_FACTOR)
-        )
+    for name, days_of_holiday in HOLIDAYS.items():
+        for holiday in days_of_holiday:
+            for before in (3, 2, 1, 0):
+                d = holiday - timedelta(days=before)
+                label = f"{name} 당일" if before == 0 else f"{name} {before}일 전"
+                for category, factor in HOLIDAY_FACTOR.items():
+                    events.append(StoreEvent(d, f"{label} (명절 대목)", factor=factor, category=category))
+            events.append(
+                StoreEvent(holiday + timedelta(days=1), f"{name} 다음날 (연휴, 손님 적음)", factor=HOLIDAY_AFTER_FACTOR)
+            )
 
     produce = [i for i in catalog.items if i.category in (Category.FRUIT, Category.VEGETABLE)]
     d = days[0] + timedelta(days=rng.randint(*TV_EVERY))

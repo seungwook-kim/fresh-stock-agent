@@ -20,12 +20,28 @@ from .catalog import load_catalog
 from .llm import LLMClient, make_llm
 from .market_calendar import MarketCalendar
 from .messages import LLMGreetingWriter, build_messages
-from .ordering import POLICIES, OrderPolicy
+from .memory import DayMemoryBank, FastEmbedEmbedder, evaluate_retrieval
+from .ordering import POLICIES, OrderPolicy, OwnerPolicy, SwitchPolicy
 from .sheet_eval import build_cases, run_eval, summarize
 from .sheets import synthetic_aliases
 from .simulator import SimulationResult, Summary, run_simulation
 
-POLICY_NAMES = [*POLICIES, AgentPolicy.name]
+AGENT_VARIANTS = {
+    # 이름: (과거 기록 검색 사용, 경험 노트 사용)
+    "agent": (False, True),
+    "agent-rag": (True, True),
+    "agent-rag-only": (True, False),
+}
+POLICY_NAMES = [*POLICIES, OwnerPolicy.name, *AGENT_VARIANTS]
+_embedder = None
+
+
+def _memory() -> DayMemoryBank:
+    """과거 기록 검색. 임베딩 모델은 한 번만 불러 여러 발주 방식이 같이 쓴다."""
+    global _embedder
+    if _embedder is None:
+        _embedder = FastEmbedEmbedder()
+    return DayMemoryBank(load_catalog(), MarketCalendar(), _embedder)
 
 
 def _add_sim_args(p: argparse.ArgumentParser) -> None:
@@ -44,6 +60,12 @@ def _add_sim_args(p: argparse.ArgumentParser) -> None:
     p.add_argument("--model", default=None, help="Claude 모델 (기본: claude-code는 sonnet, anthropic은 claude-opus-5)")
     p.add_argument("--effort", default="low", help="에이전트 추론 강도 (low, medium, high, xhigh, max)")
     p.add_argument("--llm-log", type=Path, default=Path("out/llm_calls.jsonl"), help="LLM 호출 기록 (JSONL)")
+    p.add_argument(
+        "--switch",
+        type=date.fromisoformat,
+        default=None,
+        help="이 날짜 전까지는 모든 방식이 사장님 감(owner)으로 발주해 같은 과거 기록을 쌓는다",
+    )
 
 
 def _llm(args: argparse.Namespace) -> LLMClient:
@@ -51,9 +73,21 @@ def _llm(args: argparse.Namespace) -> LLMClient:
 
 
 def _make_policy(name: str, args: argparse.Namespace) -> OrderPolicy:
-    if name == AgentPolicy.name:
-        return AgentPolicy(_llm(args))
-    return POLICIES[name]()
+    if name in AGENT_VARIANTS:
+        use_memory, use_knowledge = AGENT_VARIANTS[name]
+        policy: OrderPolicy = AgentPolicy(_llm(args), memory=_memory() if use_memory else None, use_knowledge=use_knowledge)
+    elif name == OwnerPolicy.name:
+        policy = OwnerPolicy()
+    else:
+        policy = POLICIES[name]()
+    if args.switch is not None:
+        policy = SwitchPolicy(OwnerPolicy(), policy, args.switch)
+    return policy
+
+
+def _agent(policy: OrderPolicy) -> AgentPolicy | None:
+    inner = policy.after if isinstance(policy, SwitchPolicy) else policy
+    return inner if isinstance(inner, AgentPolicy) else None
 
 
 def _run(args: argparse.Namespace, policy_name: str) -> SimulationResult:
@@ -144,7 +178,8 @@ def _serve(args: argparse.Namespace) -> None:
     def llm_factory() -> LLMClient:
         return _llm(args)
 
-    app = create_app(StoreService(store, catalog, calendar, llm_factory, args.store_name))
+    memory = None if args.no_rag else _memory()
+    app = create_app(StoreService(store, catalog, calendar, llm_factory, args.store_name, memory))
     print(f"http://{args.host}:{port} 에서 열립니다.", flush=True)
     uvicorn.run(app, host=args.host, port=port, log_level="warning")
 
@@ -175,6 +210,15 @@ def _free_port(host: str, start: int, tries: int = 50) -> int | None:
     return next((p for p in range(start, start + tries) if not _port_in_use(host, p)), None)
 
 
+def _eval_retrieval(args: argparse.Namespace) -> None:
+    embedder = None if args.bm25_only else FastEmbedEmbedder()
+    print("가게 메모 검색 평가 (data/retrieval_eval.json)\n")
+    for name, (top1, hit3, n, misses) in evaluate_retrieval(embedder).items():
+        print(f"{name:<32} 1위 적중 {top1:>2}/{n}   3위 안 적중 {hit3:>2}/{n}")
+        for miss in misses:
+            print(f"    1위 오답: {miss}")
+
+
 def _won(v: int) -> str:
     return f"{v:,}원"
 
@@ -199,13 +243,14 @@ def _print_summaries(summaries: list[Summary]) -> None:
 
 def _print_agent_stats(results: list[SimulationResult]) -> None:
     for r in results:
-        if not isinstance(r.policy, AgentPolicy) or not r.policy.llm.calls:
+        agent = _agent(r.policy)
+        if agent is None or not agent.llm.calls:
             continue
-        calls = r.policy.llm.calls
+        calls = agent.llm.calls
         print(
-            f"\n에이전트: LLM 호출 {len(calls)}회, 평균 {sum(c.seconds for c in calls) / len(calls):.1f}초, "
+            f"\n{agent.label}: LLM 호출 {len(calls)}회, 평균 {sum(c.seconds for c in calls) / len(calls):.1f}초, "
             f"입력 {sum(c.input_tokens for c in calls):,} / 출력 {sum(c.output_tokens for c in calls):,} 토큰, "
-            f"실패 후 규칙으로 대체 {r.policy.failures}회, 조정 {len(r.policy.decisions)}건"
+            f"실패 후 규칙으로 대체 {agent.failures}회, 조정 {len(agent.decisions)}건"
         )
 
 
@@ -235,16 +280,17 @@ def _write_csv(result: SimulationResult, out: Path) -> None:
             for item in result.catalog.items:
                 i = item.id
                 w.writerow([t.day, item.name, t.demand[i], t.sold[i], t.cleared[i], t.lost[i]])
-    if isinstance(result.policy, AgentPolicy):
+    agent = _agent(result.policy)
+    if agent is not None:
         with open(out / "agent_decisions.csv", "w", newline="", encoding="utf-8-sig") as f:
             w = csv.writer(f)
             w.writerow(["발주일", "품목", "규칙 추천", "에이전트", "배율", "이유"])
-            for dec in result.policy.decisions:
+            for dec in agent.decisions:
                 w.writerow([dec.day, names[dec.item_id], dec.base, dec.qty, dec.factors, dec.reason])
         with open(out / "agent_summaries.csv", "w", newline="", encoding="utf-8-sig") as f:
             w = csv.writer(f)
             w.writerow(["발주일", "요약"])
-            w.writerows(result.policy.summaries)
+            w.writerows(agent.summaries)
 
 
 def main() -> None:
@@ -282,11 +328,17 @@ def main() -> None:
     srv.add_argument("--store-name", default="우리가게")
     srv.add_argument("--host", default="127.0.0.1")
     srv.add_argument("--port", type=int, default=None, help="지정하지 않으면 8799번부터 빈 포트를 찾아 쓴다")
+    srv.add_argument("--no-rag", action="store_true", help="과거 비슷한 날 검색을 끈다 (임베딩 모델을 받지 않는다)")
     _add_sim_args(srv)
     srv.set_defaults(days=60, llm_log=Path("out/llm_web.jsonl"))
 
+    ret = sub.add_parser("eval-retrieval", help="가게 메모 검색 방식(BM25, 임베딩, 하이브리드)을 비교한다")
+    ret.add_argument("--bm25-only", action="store_true", help="임베딩 모델 없이 BM25만 잰다")
+
     args = parser.parse_args()
-    if args.command == "serve":
+    if args.command == "eval-retrieval":
+        _eval_retrieval(args)
+    elif args.command == "serve":
         _serve(args)
     elif args.command == "eval-sheets":
         _eval_sheets(args)
@@ -304,5 +356,5 @@ def main() -> None:
         if unknown:
             parser.error(f"알 수 없는 발주 방식: {', '.join(unknown)}")
         results = [_run(args, name) for name in names]
-        _print_summaries([r.summary() for r in results])
+        _print_summaries([r.summary(args.switch) for r in results])
         _print_agent_stats(results)

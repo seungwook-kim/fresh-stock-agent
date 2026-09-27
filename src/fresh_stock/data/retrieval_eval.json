@@ -1,0 +1,35 @@
+{
+  "description": "가게 메모 검색 평가. 질의와 같은 유형(type)의 문서가 상위 k개 안에 들어오는지 본다.",
+  "docs": [
+    {"text": "추석 3일 전 (명절 대목)", "type": "chuseok_before"},
+    {"text": "추석 2일 전 (명절 대목)", "type": "chuseok_before"},
+    {"text": "추석 1일 전 (명절 대목)", "type": "chuseok_before"},
+    {"text": "추석 당일 (명절 대목)", "type": "chuseok_day"},
+    {"text": "추석 다음날 (연휴, 손님 적음)", "type": "holiday_after"},
+    {"text": "설날 2일 전 (명절 대목)", "type": "seol_before"},
+    {"text": "설 전날, 차례상 장보기", "type": "seol_before"},
+    {"text": "비 예보 (강수확률 80%)", "type": "rain"},
+    {"text": "장마 시작, 종일 비", "type": "rain"},
+    {"text": "태풍 북상, 오후부터 강한 비", "type": "rain"},
+    {"text": "어제 저녁 TV 건강 프로그램에서 양배추 효능 소개 (손님 문의 많을 듯)", "type": "tv"},
+    {"text": "그저께 TV에서 수박 효능 소개", "type": "tv"},
+    {"text": "TV 아침방송에 블루베리 나옴", "type": "tv"},
+    {"text": "폭염 주의보, 낮 최고 35도", "type": "heat"},
+    {"text": "근처 초등학교 운동회", "type": "event"}
+  ],
+  "queries": [
+    {"text": "추석 2일 전 (명절 대목)", "type": "chuseok_before"},
+    {"text": "추석 3일 앞", "type": "chuseok_before"},
+    {"text": "한가위 전날", "type": "chuseok_before"},
+    {"text": "설 연휴 전날", "type": "seol_before"},
+    {"text": "구정 이틀 전", "type": "seol_before"},
+    {"text": "비가 온다고 함", "type": "rain"},
+    {"text": "소나기 예보", "type": "rain"},
+    {"text": "태풍 온대", "type": "rain"},
+    {"text": "TV에 브로콜리가 몸에 좋다고 나옴", "type": "tv"},
+    {"text": "건강 프로그램에 사과 소개됨", "type": "tv"},
+    {"text": "무더위, 35도 넘는대", "type": "heat"},
+    {"text": "추석 연휴 끝난 다음날", "type": "holiday_after"},
+    {"text": "학교 운동회", "type": "event"}
+  ]
+}

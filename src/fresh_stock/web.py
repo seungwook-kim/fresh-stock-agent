@@ -203,6 +203,7 @@ def create_app(service: StoreService) -> FastAPI:
             changed=changed,
             stock=stock,
             notes=ctx.notes if ctx else {},
+            similar=service.similar_days(day),
             entered=entered or {ln.item_id: ln.final for ln in plan.lines},
             warnings=warnings or {},
         )

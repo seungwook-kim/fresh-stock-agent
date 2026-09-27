@@ -27,6 +27,7 @@ class OrderContext:
     catalog: Catalog
     calendar: MarketCalendar
     notes: dict[date, list[str]] = field(default_factory=dict)  # 버틸 날들에 대해 가게가 미리 아는 일
+    note_log: dict[date, list[str]] = field(default_factory=dict)  # 오늘까지의 가게 메모 (과거 비슷한 날 검색용)
 
     def stock(self, item_id: str) -> float:
         return self.ledger[-1].closing.get(item_id, 0.0) if self.ledger else 0.0
@@ -105,6 +106,48 @@ class SeasonalPolicy:
             need = sum(self.forecast(ctx, item, d) for d in ctx.cover_days)
             orders[item.id] = _order_qty(need * self.safety_factor - ctx.stock(item.id))
         return orders
+
+
+class OwnerPolicy(SeasonalPolicy):
+    """경험 많은 사장님의 발주: 요일·장날 보정에, 메모를 보고 감으로 배율을 곱한다.
+
+    실험에서 "작년 기록"을 만들 때 쓴다. 사장님 머릿속의 감이라 실제 배율과 조금 다르다.
+    """
+
+    name = "owner"
+    label = "사장님 감"
+    holiday = {"과일": 2.5, "야채": 2.2, "기타": 2.0}
+
+    def feel(self, notes: list[str], item: Item) -> float:
+        factor = 1.0
+        for note in notes:
+            if "명절 대목" in note:
+                factor *= self.holiday[item.category]
+            elif "연휴" in note:
+                factor *= 0.6
+            elif "비 예보" in note:
+                factor *= 0.7
+            elif "효능" in note and item.name in note:
+                factor *= 2.5 if "어제" in note else 1.5
+        return factor
+
+    def decide(self, ctx: OrderContext) -> dict[str, int]:
+        orders = {}
+        for item in ctx.catalog.items:
+            need = sum(self.forecast(ctx, item, d) * self.feel(ctx.notes.get(d, []), item) for d in ctx.cover_days)
+            orders[item.id] = _order_qty(need * self.safety_factor - ctx.stock(item.id))
+        return orders
+
+
+class SwitchPolicy:
+    """switch 날짜 전에는 before, 그 뒤로는 after로 발주한다. 과거 기록을 쌓은 뒤 비교하는 실험용."""
+
+    def __init__(self, before: OrderPolicy, after: OrderPolicy, switch: date):
+        self.before, self.after, self.switch = before, after, switch
+        self.name, self.label = after.name, after.label
+
+    def decide(self, ctx: OrderContext) -> dict[str, int]:
+        return (self.after if ctx.today >= self.switch else self.before).decide(ctx)
 
 
 def check_order(

@@ -5,6 +5,7 @@ import pytest
 from fresh_stock.catalog import load_catalog
 from fresh_stock.demo import demo_closing, seed_demo
 from fresh_stock.market_calendar import MarketCalendar
+from fresh_stock.memory import DayMemoryBank, HashEmbedder
 from fresh_stock.service import ORDER, SHEET, StoreService
 from fresh_stock.store import Store
 
@@ -20,9 +21,11 @@ class FakeLLM:
         self.sheet_rows = sheet_rows or []
         self.adjustments = list(adjustments)
         self.calls = []
+        self.prompts = []
 
     def generate_json(self, system, prompt, schema, purpose="", images=()):
         self.calls.append(purpose)
+        self.prompts.append(prompt)
         if purpose.startswith("sheet"):
             return {"rows": self.sheet_rows}
         if purpose.startswith("order"):
@@ -51,7 +54,10 @@ def test_seed_demo_starts_at_sheet_step(demo):
     assert service.status() == (SHEET, first)
     assert first == START + timedelta(days=30)
     assert store.received(first)  # 전날 발주가 오늘 입고로 들어와 있다
-    assert len(store.notes()) == 2
+    past = [t for _, d, t in store.notes() if d < first]
+    upcoming = [t for _, d, t in store.notes() if d >= first]
+    assert past  # 지난 60일의 가게 메모 (과거 비슷한 날 검색용)
+    assert len(upcoming) == 2
 
 
 def test_full_day_flow(demo):
@@ -144,3 +150,17 @@ def test_confirmed_names_become_aliases(demo):
     service.confirm_sheet(day, {0: ("cherry_tomato", 2.0), 1: ("apple", 1.0), 2: ("tomato", 4.5)}, 0, 0)
     # 정식 이름(사과)과 숫자가 섞인 글자(토마 용 4반)는 줄임말로 쓰지 않는다
     assert service.learned_aliases() == {"방토": "cherry_tomato"}
+
+
+def test_agent_gets_similar_past_days(demo):
+    store, day = demo
+    llm = FakeLLM(sheet_rows=[_row("토마", "3", "tomato")])
+    memory = DayMemoryBank(catalog, calendar, HashEmbedder())
+    service = StoreService(store, catalog, calendar, llm_factory=lambda: llm, memory=memory)
+    service.read_sheet(day, b"jpg")
+    service.confirm_sheet(day, {0: ("tomato", 3.0)}, 0, 0)
+    similar = service.similar_days(day)
+    assert similar and all("실제 판매" in text for text in similar)
+    service.plan_for(day)
+    order_prompt = next(p for c, p in zip(llm.calls, llm.prompts) if c.startswith("order"))
+    assert "[과거 비슷한 날]" in order_prompt

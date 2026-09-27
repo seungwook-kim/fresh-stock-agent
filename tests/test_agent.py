@@ -63,7 +63,7 @@ def test_history_lookup_then_raise_factor():
     dec = r.policy.decisions[0]
     assert dec.item_id == "tomato" and dec.qty > dec.base
     assert _first_order(r, "tomato") == dec.qty
-    assert "[판매 기록 조회 1]" in llm.prompts[1]
+    assert "[조회·검색 1]" in llm.prompts[1]
     assert "토마토(박스)" in llm.prompts[1]
     assert dec.reason == "TV 효능 소개"
 

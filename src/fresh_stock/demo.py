@@ -48,6 +48,12 @@ def seed_demo(store: Store, catalog: Catalog, calendar: MarketCalendar, start: d
     arrival_orders = by_day.get((first_open - timedelta(days=1), first_open), [])
     store.save_received(first_open, {o.item_id: o.final for o in arrival_orders})
 
+    # 지난 가게 메모 (과거 비슷한 날 검색에 쓰인다)
+    for d, notes in sorted(result.notes.items()):
+        if d < first_open:
+            for text in notes:
+                store.add_note(d, text)
+
     # 앞으로 며칠 동안의 가게 메모
     tv_item = random.Random(seed).choice([i for i in catalog.items if i.category == "야채"])
     store.add_note(first_open + timedelta(days=1), f"어제 저녁 TV 건강 프로그램에서 {tv_item.name} 효능 소개 (손님 문의 많을 듯)")

@@ -57,6 +57,7 @@ class Summary:
     days: int
     revenue: int
     purchase_cost: int
+    opening_stock_cost: int  # 집계 시작 전날 마감 재고 (원가)
     ending_stock_cost: int
     clearance_cost: int  # 떨이로 나간 물량 (원가 기준)
     lost_sales: int  # 품절로 놓친 매출 (정가 기준)
@@ -67,7 +68,7 @@ class Summary:
 
     @property
     def profit(self) -> int:
-        return self.revenue - self.purchase_cost + self.ending_stock_cost
+        return self.revenue - self.purchase_cost + self.ending_stock_cost - self.opening_stock_cost
 
     @property
     def clearance_rate(self) -> float:
@@ -84,22 +85,28 @@ class SimulationResult:
     notes: dict[date, list[str]] = field(default_factory=dict)  # 날짜별 가게 메모
     ending_stock: dict[str, float] = field(default_factory=dict)
 
-    def summary(self) -> Summary:
+    def summary(self, start: date | None = None) -> Summary:
+        """start 이후 날들만 집계한다 (없으면 전체). 시작 전날 마감 재고는 원가로 빼서 이익에 반영한다."""
         item = self.catalog.item
+        idx = 0 if start is None else next((k for k, r in enumerate(self.ledger) if r.day >= start), len(self.ledger))
+        ledger, truths = self.ledger[idx:], self.truths[idx:]
+        orders = [o for o in self.orders if start is None or o.day >= start]
+        opening = self.ledger[idx - 1].closing if idx > 0 else {}
         return Summary(
             policy=self.policy.label,
-            days=len(self.ledger),
-            revenue=sum(r.revenue for r in self.ledger),
-            purchase_cost=round(sum(q * item(i).cost for r in self.ledger for i, q in r.received.items())),
+            days=len(ledger),
+            revenue=sum(r.revenue for r in ledger),
+            purchase_cost=round(sum(q * item(i).cost for r in ledger for i, q in r.received.items())),
+            opening_stock_cost=round(sum(q * item(i).cost for i, q in opening.items())),
             ending_stock_cost=round(sum(q * item(i).cost for i, q in self.ending_stock.items())),
-            clearance_cost=round(sum(q * item(i).cost for t in self.truths for i, q in t.cleared.items())),
-            lost_sales=round(sum(q * item(i).price for t in self.truths for i, q in t.lost.items())),
+            clearance_cost=round(sum(q * item(i).cost for t in truths for i, q in t.cleared.items())),
+            lost_sales=round(sum(q * item(i).price for t in truths for i, q in t.lost.items())),
             markdown_loss=round(
-                sum(q * item(i).price * (1 - MARKDOWN_RATE) for t in self.truths for i, q in t.cleared.items())
+                sum(q * item(i).price * (1 - MARKDOWN_RATE) for t in truths for i, q in t.cleared.items())
             ),
-            typos=sum(o.typo for o in self.orders),
-            typos_caught=sum(o.typo and o.warning is not None for o in self.orders),
-            false_alarms=sum(not o.typo and o.warning is not None for o in self.orders),
+            typos=sum(o.typo for o in orders),
+            typos_caught=sum(o.typo and o.warning is not None for o in orders),
+            false_alarms=sum(not o.typo and o.warning is not None for o in orders),
         )
 
 
@@ -202,6 +209,7 @@ def run_simulation(
             catalog=catalog,
             calendar=calendar,
             notes={c: notes[c] for c in cover_days if notes.get(c)},
+            note_log={day: n for day, n in notes.items() if day <= d and n},
         )
         proposed = policy.decide(ctx)
         for item in catalog.items:
