@@ -26,11 +26,13 @@
   <table>
     <tr><th>적힌 글자</th><th>품목</th><th class="num">재고</th></tr>
     {% for r in rows %}
-      <tr class="{{ 'flag' if r.flags }}">
+      {% set typed = entered.get(r.idx) %}
+      <tr class="{{ 'warn' if r.idx in bad else ('flag' if r.flags) }}">
         <td>{{ r.raw_name }} <b>{{ r.raw_qty }}</b>
           {% if r.flags %}<div class="flags">{{ r.flags | join(' · ') }}</div>{% endif %}</td>
-        <td>{{ item_select('item_%d' % r.idx, r.item_id_read) }}</td>
-        <td class="num"><input class="qty" name="qty_{{ r.idx }}" value="{{ '%g' % r.qty_read if r.qty_read is not none else r.raw_qty }}"></td>
+        <td>{{ item_select('item_%d' % r.idx, typed[0] if typed else r.item_id_read) }}</td>
+        <td class="num"><input class="qty" name="qty_{{ r.idx }}"
+          value="{{ typed[1] if typed else ('%g' % r.qty_read if r.qty_read is not none else r.raw_qty) }}"></td>
       </tr>
     {% endfor %}
   </table>
@@ -49,8 +51,9 @@
   <table>
     {% for k in range(3) %}
       {% set idx = rows | length + k %}
-      <tr><td>{{ item_select('item_%d' % idx, None) }}</td>
-          <td class="num"><input class="qty" name="qty_{{ idx }}" placeholder="수량"></td></tr>
+      {% set typed = entered.get(idx) %}
+      <tr class="{{ 'warn' if idx in bad }}"><td>{{ item_select('item_%d' % idx, typed[0] if typed else None) }}</td>
+          <td class="num"><input class="qty" name="qty_{{ idx }}" placeholder="수량" value="{{ typed[1] if typed else '' }}"></td></tr>
     {% endfor %}
   </table>
 </div>
@@ -58,8 +61,8 @@
 <div class="card">
   <b>오늘 매출</b>
   <div class="row" style="margin-top:8px">
-    <label>돈통 현금 <input name="cash" inputmode="numeric" placeholder="0" style="width:9em"></label>
-    <label>카드 합계 <input name="card" inputmode="numeric" placeholder="0" style="width:9em"></label>
+    <label>돈통 현금 <input name="cash" inputmode="numeric" placeholder="0" value="{{ cash }}" style="width:9em"></label>
+    <label>카드 합계 <input name="card" inputmode="numeric" placeholder="0" value="{{ card }}" style="width:9em"></label>
   </div>
 </div>
 <button class="btn block">재고 확정</button>

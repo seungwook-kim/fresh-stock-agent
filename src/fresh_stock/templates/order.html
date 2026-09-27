@@ -11,7 +11,13 @@
   {% for d, texts in notes | dictsort %}{% for t in texts %}<div>{{ d | day }} {{ t }}</div>{% endfor %}{% endfor %}
 </div>
 {% endif %}
-<div class="card"><b>발주 에이전트</b><div>{{ plan.summary }}</div></div>
+<div class="card"><b>발주 에이전트</b><div>{{ plan.summary }}</div>
+  <div class="muted" style="margin-top:6px">
+    {% if changed %}평소 추천에서 수량이 바뀐 품목:
+      {% for ln in changed %}{{ catalog.item(ln.item_id).name }} {{ ln.base }} → {{ ln.recommended }}{{ ', ' if not loop.last }}{% endfor %}
+    {% else %}평소 추천에서 수량이 바뀐 품목은 없어요.{% endif %}
+  </div>
+</div>
 
 {% if warnings %}
 <div class="alert">
@@ -29,7 +35,9 @@
         {% set item = catalog.item(ln.item_id) %}
         <tr class="{{ 'warn' if ln.item_id in warnings }}">
           <td>{{ item.name }} <span class="muted">{{ item.unit }}</span>
-            {% if ln.reason %}<div class="reason">규칙 {{ ln.base }} → {{ ln.recommended }} · {{ ln.reason }}</div>{% endif %}
+            {% if ln.reason %}<div class="reason">{{ ln.reason }}<br>
+              수요 {{ ln.factors }} ·
+              {% if ln.recommended == ln.base %}남은 재고로 충분해 발주 그대로{% else %}규칙 {{ ln.base }} → {{ ln.recommended }}{% endif %}</div>{% endif %}
             {% if ln.item_id in warnings %}<div class="warning">{{ warnings[ln.item_id] }}</div>{% endif %}</td>
           <td class="num">{{ '%g' % stock.get(ln.item_id, 0) }}</td>
           <td class="num">{{ ln.recommended }}</td>

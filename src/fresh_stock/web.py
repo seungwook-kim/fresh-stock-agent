@@ -110,12 +110,16 @@ def create_app(service: StoreService) -> FastAPI:
         data = service.store.sheet_image(day)
         return Response(data or b"", media_type="image/jpeg")
 
-    @app.get("/sheet/review")
-    def review(request: Request, error: str = ""):
-        _, day = service.status()
+    def _review_page(
+        request: Request,
+        day: date,
+        entered: dict[int, tuple[str, str]] | None = None,
+        bad: frozenset[int] = frozenset(),
+        error: str = "",
+        money: tuple[str, str] = ("", ""),
+    ):
+        """재고표 확인 화면. 확정에 실패하면 사람이 입력한 값(entered)을 그대로 다시 보여준다."""
         rows = service.store.sheet_rows(day)
-        if not rows:
-            return go("/sheet")
         max_possible, _ = service.sheet_bounds(day)
         return render(
             request,
@@ -125,31 +129,51 @@ def create_app(service: StoreService) -> FastAPI:
             flagged=sum(bool(r.flags) for r in rows),
             missing=[catalog.item(i) for i in service.missing_items(day, rows)],
             max_possible=max_possible,
+            entered=entered or {},
+            bad=bad,
             error=error,
+            cash=money[0],
+            card=money[1],
         )
+
+    @app.get("/sheet/review")
+    def review(request: Request):
+        _, day = service.status()
+        if not service.store.sheet_rows(day):
+            return go("/sheet")
+        return _review_page(request, day)
 
     @app.post("/sheet/confirm")
     async def confirm(request: Request):
         _, day = service.status()
         form = await request.form()
+        rows = {r.idx: r for r in service.store.sheet_rows(day)}
+        entered: dict[int, tuple[str, str]] = {}
         finals: dict[int, tuple[str | None, float | None]] = {}
-        bad = []
+        bad = set()
         for key, value in form.items():
             if not key.startswith("item_"):
                 continue
             idx = int(key.removeprefix("item_"))
             item_id = str(value) or None
             qty_text = str(form.get(f"qty_{idx}", "")).strip()
+            entered[idx] = (item_id or "", qty_text)
             if item_id is None and not qty_text:
                 continue
             qty = parse_qty(qty_text) if qty_text else 0.0
             if item_id is None or qty is None:
-                bad.append(f"{idx + 1}번째 줄")
+                bad.add(idx)
             finals[idx] = (item_id, qty)
+        cash_text = str(form.get("cash") or "0").replace(",", "").strip() or "0"
+        card_text = str(form.get("card") or "0").replace(",", "").strip() or "0"
+        if not (cash_text.isdigit() and card_text.isdigit()):
+            money = (str(form.get("cash") or ""), str(form.get("card") or ""))
+            return _review_page(request, day, entered, frozenset(bad), "현금·카드 합계는 숫자로 입력해 주세요.", money)
         if bad:
-            return go("/sheet/review?" + urlencode({"error": f"{', '.join(bad)}의 품목이나 수량을 확인해 주세요."}))
-        cash = int(str(form.get("cash") or 0).replace(",", "") or 0)
-        card = int(str(form.get("card") or 0).replace(",", "") or 0)
+            names = [f"{rows[i].raw_name} {rows[i].raw_qty}" if i in rows else "추가한 줄" for i in sorted(bad)]
+            error = f"빨간 줄({', '.join(names)})의 품목이나 수량을 확인해 주세요."
+            return _review_page(request, day, entered, frozenset(bad), error, (cash_text, card_text))
+        cash, card = int(cash_text), int(card_text)
         service.confirm_sheet(day, finals, cash, card)
         step, _ = service.status()
         return go("/order" if step == ORDER else "/")
@@ -160,17 +184,22 @@ def create_app(service: StoreService) -> FastAPI:
         plan = service.plan_for(day)
         ctx = service.order_context(day)
         stock = service.store.closing(day)
+        order = {item.id: n for n, item in enumerate(catalog.items)}
+        all_lines = sorted(plan.lines, key=lambda ln: order[ln.item_id])
         groups = []
         for supplier in catalog.suppliers:
-            lines = [ln for ln in plan.lines if catalog.item(ln.item_id).supplier_id == supplier.id]
+            lines = [ln for ln in all_lines if catalog.item(ln.item_id).supplier_id == supplier.id]
             if lines:
                 groups.append((supplier, lines))
+        # 에이전트 요약은 LLM이 쓴 글이라 실제 결과와 다를 수 있다. 수량이 바뀐 품목은 코드로 따로 보여준다
+        changed = [ln for ln in all_lines if ln.recommended != ln.base]
         return render(
             request,
             "order.html",
             day=day,
             plan=plan,
             groups=groups,
+            changed=changed,
             stock=stock,
             notes=ctx.notes if ctx else {},
             entered=entered or {ln.item_id: ln.final for ln in plan.lines},

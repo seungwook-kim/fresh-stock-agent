@@ -79,6 +79,7 @@ def test_full_day_through_web(app_env):
     assert service.store.closing(day)["tangerine"] == 2.0
     assert service.store.correction_stats()["사람이 고친 줄"] == 1
     assert "TV 방송을 반영했습니다." in r.text and "TV 효능 소개" in r.text
+    assert "평소 추천에서 수량이 바뀐 품목" in r.text
 
     plan = service.store.plan(day)
     finals = {f"final_{ln.item_id}": str(ln.recommended) for ln in plan.lines}
@@ -98,8 +99,10 @@ def test_full_day_through_web(app_env):
 def test_sheet_confirm_rejects_unreadable_qty(app_env):
     client, _, _, _ = app_env
     client.post("/sheet", files={"photo": ("sheet.jpg", b"x", "image/jpeg")})
-    r = client.post("/sheet/confirm", data={"item_0": "tomato", "qty_0": "??"}, follow_redirects=True)
-    assert "1번째 줄의 품목이나 수량을 확인해 주세요." in r.text
+    r = client.post("/sheet/confirm", data={"item_0": "tomato", "qty_0": "??", "item_1": "tangerine", "qty_1": "7"})
+    assert "빨간 줄(토마 4반)의 품목이나 수량을 확인해 주세요." in r.text
+    assert 'value="7"' in r.text  # 사람이 고친 다른 줄의 값은 그대로 남는다
+    assert '<option value="tangerine" selected>' in r.text
 
 
 def test_sheet_read_failure_shows_error():
