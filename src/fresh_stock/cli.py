@@ -44,10 +44,10 @@ def _print_summaries(summaries: list[Summary]) -> None:
     rows = [
         ("매출", lambda s: _won(s.revenue)),
         ("이익 (매출 - 매입 + 남은 재고)", lambda s: _won(s.profit)),
-        ("폐기 (원가)", lambda s: _won(s.waste_cost)),
-        ("폐기율 (매입 대비)", lambda s: f"{s.waste_rate:.1%}"),
-        ("품절로 놓친 매출", lambda s: _won(s.lost_sales)),
+        ("떨이 물량 (원가)", lambda s: _won(s.clearance_cost)),
+        ("떨이 비중 (매입 대비)", lambda s: f"{s.clearance_rate:.1%}"),
         ("떨이 할인액", lambda s: _won(s.markdown_loss)),
+        ("품절로 놓친 매출", lambda s: _won(s.lost_sales)),
         ("입력 실수 / 경고로 막음", lambda s: f"{s.typos} / {s.typos_caught}"),
         ("오경보", lambda s: str(s.false_alarms)),
     ]
@@ -63,11 +63,10 @@ def _write_csv(result: SimulationResult, out: Path) -> None:
     names = {i.id: i.name for i in result.catalog.items}
     with open(out / "ledger.csv", "w", newline="", encoding="utf-8-sig") as f:
         w = csv.writer(f)
-        w.writerow(["날짜", "품목", "입고", "마감재고", "폐기"])
+        w.writerow(["날짜", "품목", "입고", "마감재고"])
         for rec in result.ledger:
             for item in result.catalog.items:
-                i = item.id
-                w.writerow([rec.day, item.name, rec.received.get(i, 0), rec.closing[i], rec.wasted[i]])
+                w.writerow([rec.day, item.name, rec.received.get(item.id, 0), rec.closing[item.id]])
     with open(out / "payments.csv", "w", newline="", encoding="utf-8-sig") as f:
         w = csv.writer(f)
         w.writerow(["날짜", "현금", "카드", "합계"])
@@ -80,11 +79,11 @@ def _write_csv(result: SimulationResult, out: Path) -> None:
             w.writerow([o.day, o.arrival, names[o.item_id], o.proposed, o.entered, o.final, o.typo, o.warning or ""])
     with open(out / "truth.csv", "w", newline="", encoding="utf-8-sig") as f:
         w = csv.writer(f)
-        w.writerow(["날짜", "품목", "수요", "정가판매", "떨이판매", "폐기", "품절"])
+        w.writerow(["날짜", "품목", "정가수요", "정가판매", "떨이판매", "품절"])
         for t in result.truths:
             for item in result.catalog.items:
                 i = item.id
-                w.writerow([t.day, item.name, t.demand[i], t.sold[i], t.sold_markdown[i], t.wasted[i], t.lost[i]])
+                w.writerow([t.day, item.name, t.demand[i], t.sold[i], t.cleared[i], t.lost[i]])
 
 
 def main() -> None:

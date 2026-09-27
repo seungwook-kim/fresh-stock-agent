@@ -10,7 +10,7 @@ from functools import cached_property
 from statistics import mean, median
 from typing import Protocol
 
-from .accounting import DayRecord, sales_series
+from .accounting import DayRecord, regular_sales_series
 from .catalog import Catalog
 from .domain import Item
 from .market_calendar import MarketCalendar
@@ -32,10 +32,10 @@ class OrderContext:
 
     @cached_property
     def _sales(self) -> list[dict[str, float]]:
-        return sales_series(self.ledger)
+        return regular_sales_series(self.ledger, self.catalog)
 
     def demand_history(self, item_id: str) -> list[tuple[date, float]]:
-        """날짜별 수요 추정치. 다 팔린 날은 실제 수요가 더 컸을 것이므로 올려 잡는다."""
+        """날짜별 정가 수요 추정치. 떨이는 빼고, 다 팔린 날은 실제 수요가 더 컸을 것이므로 올려 잡는다."""
         return [
             (rec.day, sold.get(item_id, 0.0) * (SOLD_OUT_BUMP if rec.closing.get(item_id, 0.0) == 0 else 1.0))
             for rec, sold in zip(self.ledger, self._sales)
@@ -57,7 +57,7 @@ def _order_qty(need: float) -> int:
 class YesterdayPolicy:
     """기존 방식: 오늘 판매량만큼 버틸 날 수대로 가져온다.
 
-    실제 매장 방식 그대로 남은 재고는 빼지 않는다. 남은 건 떨이로 판다.
+    실제 매장 방식 그대로 남은 재고는 빼지 않는다. 남은 건 기한이 지나면 떨이로 판다.
     """
 
     name = "yesterday"

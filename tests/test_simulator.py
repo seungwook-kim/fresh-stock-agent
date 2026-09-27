@@ -22,12 +22,12 @@ def test_catalog_loads():
 
 @pytest.mark.parametrize("policy", [YesterdayPolicy(), SeasonalPolicy()])
 def test_stock_is_conserved(policy):
-    """들어온 양 = 정가 판매 + 떨이 판매 + 폐기 + 남은 재고."""
+    """들어온 양 = 정가 판매 + 떨이 + 남은 재고. 버리는 물건은 없다."""
     r = _run(policy)
     for item in catalog.items:
         i = item.id
         received = sum(rec.received.get(i, 0) for rec in r.ledger)
-        used = sum(t.sold[i] + t.sold_markdown[i] + t.wasted[i] for t in r.truths)
+        used = sum(t.sold[i] + t.cleared[i] for t in r.truths)
         assert received == pytest.approx(used + r.ending_stock[i], abs=0.1)
 
 
@@ -44,7 +44,7 @@ def test_guardrail_reduces_typo_damage():
     on = _run(SeasonalPolicy(), typo_rate=0.05).summary()
     off = _run(SeasonalPolicy(), typo_rate=0.05, guardrail=False).summary()
     assert on.typos_caught > 0
-    assert on.waste_cost < off.waste_cost
+    assert on.clearance_cost < off.clearance_cost
 
 
 def test_no_order_arrives_on_sunday():

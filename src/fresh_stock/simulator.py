@@ -19,7 +19,7 @@ from .ordering import OrderContext, OrderPolicy, check_order
 WEEKDAY_FACTOR = (0.9, 0.9, 0.95, 1.0, 1.1, 1.3, 1.2)  # 월~일
 MARKET_DAY_FACTOR = 1.6
 DEMAND_CV = 0.3  # 수요 변동계수
-MARKDOWN_RATE = 0.5  # 떨이 판매가 비율
+MARKDOWN_RATE = 0.5  # 떨이 판매가 비율 (정가 대비). 버리는 물건 없이 떨이로 전부 판다
 CARD_SHARE = (0.5, 0.7)  # 매출 중 카드 비중 범위
 
 
@@ -34,8 +34,7 @@ class DayTruth:
     day: date
     demand: dict[str, float]
     sold: dict[str, float]  # 정가 판매
-    sold_markdown: dict[str, float]  # 떨이 판매
-    wasted: dict[str, float]
+    cleared: dict[str, float]  # 정가 기한이 지나 떨이로 판 양
     lost: dict[str, float]  # 재고가 없어 못 판 수요
 
 
@@ -58,7 +57,7 @@ class Summary:
     revenue: int
     purchase_cost: int
     ending_stock_cost: int
-    waste_cost: int
+    clearance_cost: int  # 떨이로 나간 물량 (원가 기준)
     lost_sales: int  # 품절로 놓친 매출 (정가 기준)
     markdown_loss: int  # 떨이로 깎아준 금액
     typos: int
@@ -70,8 +69,8 @@ class Summary:
         return self.revenue - self.purchase_cost + self.ending_stock_cost
 
     @property
-    def waste_rate(self) -> float:
-        return self.waste_cost / self.purchase_cost if self.purchase_cost else 0.0
+    def clearance_rate(self) -> float:
+        return self.clearance_cost / self.purchase_cost if self.purchase_cost else 0.0
 
 
 @dataclass
@@ -91,10 +90,10 @@ class SimulationResult:
             revenue=sum(r.revenue for r in self.ledger),
             purchase_cost=round(sum(q * item(i).cost for r in self.ledger for i, q in r.received.items())),
             ending_stock_cost=round(sum(q * item(i).cost for i, q in self.ending_stock.items())),
-            waste_cost=round(sum(q * item(i).cost for t in self.truths for i, q in t.wasted.items())),
+            clearance_cost=round(sum(q * item(i).cost for t in self.truths for i, q in t.cleared.items())),
             lost_sales=round(sum(q * item(i).price for t in self.truths for i, q in t.lost.items())),
             markdown_loss=round(
-                sum(q * item(i).price * (1 - MARKDOWN_RATE) for t in self.truths for i, q in t.sold_markdown.items())
+                sum(q * item(i).price * (1 - MARKDOWN_RATE) for t in self.truths for i, q in t.cleared.items())
             ),
             typos=sum(o.typo for o in self.orders),
             typos_caught=sum(o.typo and o.warning is not None for o in self.orders),
@@ -154,35 +153,30 @@ def run_simulation(
             if qty > 0:
                 batches[item_id].append(_Batch(qty))
 
-        sold, sold_md, wasted, lost, closing, wasted_rec = {}, {}, {}, {}, {}, {}
+        sold, cleared, lost, closing = {}, {}, {}, {}
         revenue = 0.0
         for item in catalog.items:
+            # 아침: 정가 기한이 지난 물건은 떨이 매대로 빼서 그날 전부 판다
+            clear = sum(b.qty for b in batches[item.id] if b.age >= item.shelf_life)
+            fresh = [b for b in batches[item.id] if b.age < item.shelf_life]
+            # 정가 손님에게는 오래된 것부터 판다
             remaining = demand[d][item.id]
-            full = md = 0.0
-            # 오래된 것부터 판다. 정가 판매 기한이 지난 묶음은 떨이 가격이다
-            for b in sorted(batches[item.id], key=lambda b: -b.age):
+            full = 0.0
+            for b in sorted(fresh, key=lambda b: -b.age):
                 take = min(b.qty, remaining)
                 b.qty -= take
                 remaining -= take
-                if b.age >= item.shelf_life:
-                    md += take
-                else:
-                    full += take
-            waste = sum(b.qty for b in batches[item.id] if b.age >= item.shelf_life)
-            batches[item.id] = [b for b in batches[item.id] if b.age < item.shelf_life and b.qty > 1e-9]
+                full += take
+            batches[item.id] = [b for b in fresh if b.qty > 1e-9]
             for b in batches[item.id]:
                 b.age += 1
-            sold[item.id], sold_md[item.id] = round(full, 2), round(md, 2)
-            wasted[item.id], lost[item.id] = round(waste, 2), round(remaining, 2)
+            sold[item.id], cleared[item.id], lost[item.id] = round(full, 2), round(clear, 2), round(remaining, 2)
             closing[item.id] = _round_to_step(sum(b.qty for b in batches[item.id]), item.count_step)
-            wasted_rec[item.id] = _round_to_step(waste, item.count_step)
-            revenue += full * item.price + md * item.price * MARKDOWN_RATE
+            revenue += full * item.price + clear * item.price * MARKDOWN_RATE
 
         card = round(revenue * pay_rng.uniform(*CARD_SHARE))
-        result.ledger.append(DayRecord(
-                day=d, received=received, closing=closing, wasted=wasted_rec, cash=round(revenue) - card, card=card
-            ))
-        result.truths.append(DayTruth(d, demand[d], sold, sold_md, wasted, lost))
+        result.ledger.append(DayRecord(day=d, received=received, closing=closing, cash=round(revenue) - card, card=card))
+        result.truths.append(DayTruth(d, demand[d], sold, cleared, lost))
 
         arrival = d + timedelta(days=1)
         if arrival > dates[-1] or not calendar.is_supply_day(arrival):
