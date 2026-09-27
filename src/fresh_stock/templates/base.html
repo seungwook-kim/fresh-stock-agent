@@ -32,8 +32,14 @@
   .btn.block { display: block; width: 100%; text-align: center; }
   .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
   input, select, textarea { font: inherit; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: #fff; }
-  table { width: 100%; border-collapse: collapse; }
-  th, td { padding: 8px 6px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+  /* 휴대폰 너비에서 입력칸이 화면 밖으로 밀리지 않게 열 너비를 고정하고 긴 글자는 줄바꿈한다 */
+  table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+  th, td { padding: 8px 6px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top;
+           overflow-wrap: anywhere; }
+  td select { width: 100%; padding: 8px 4px; }
+  col.qty-col { width: 4.6em; }
+  col.num-col { width: 3.4em; }
+  col.item-col { width: 42%; }
   th { font-size: .85rem; color: var(--muted); font-weight: 600; }
   td.num, th.num { text-align: right; white-space: nowrap; }
   tr.flag td { background: var(--flag); }
@@ -43,7 +49,7 @@
   .reason { font-size: .82rem; color: var(--accent); }
   .alert { background: var(--warn); color: var(--warn-ink); border-radius: 10px; padding: 10px 14px; margin-bottom: 12px; }
   .note { background: var(--agent); border-radius: 10px; padding: 10px 14px; margin-bottom: 12px; }
-  .qty { width: 5.2em; text-align: right; }
+  .qty { width: 100%; text-align: right; padding: 8px 6px; }
   pre.msg { white-space: pre-wrap; font: inherit; margin: 0; background: #faf9f6; border: 1px solid var(--line);
             border-radius: 8px; padding: 10px 12px; }
   img.sheet { width: 100%; border-radius: 8px; border: 1px solid var(--line); }

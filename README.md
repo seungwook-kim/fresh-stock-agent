@@ -11,9 +11,17 @@
 | 과거 비슷한 날 검색 (RAG) | 사장님 경험 노트 없이 기록 검색만으로 규칙 대비 이익 +5.5~9%, 품절 −18~24% (사장님 감 수준) |
 | 매장 고유 약어 기억 | 확인 화면에서 고친 기록으로 약어를 익혀, 표시 없이 틀린 줄 7 → 3, 불필요한 확인 표시 23% → 7% |
 | 입력 실수 가드레일 (가상 매장 90일) | 발주 입력 실수 19건 중 19건 차단, 오경보 0건 |
-| 화면 | 모바일 웹: 재고표 사진 → 확인 → 발주 승인 → 거래처 문자 복사 |
+| 화면 | 모바일 웹: 재고표 사진 → 확인 → 발주 승인 → 거래처 문자 복사, LLM 호출 기록 |
 
 모든 수치는 가상 매장과 합성 재고표 기준이며 실제 매장 성과가 아니다. 가정과 한계는 아래에 적었다.
+
+<p>
+<img src="docs/screens/review.png" width="250" alt="재고표 확인 화면">
+<img src="docs/screens/order.png" width="250" alt="발주 화면">
+<img src="docs/screens/home.png" width="250" alt="홈 화면">
+</p>
+
+왼쪽부터 재고표 확인(확인이 필요한 줄만 노란색), 발주(가게 메모·참고한 과거 기록·에이전트 요약), 홈(가게 메모·매출 비교·인식 기록). 휴대폰 너비 390px.
 
 ## 배경
 
@@ -52,7 +60,7 @@ flowchart LR
 ```bash
 uv sync
 uv run fresh-stock serve --demo        # 모바일 웹 (가상 매장 기록 60일을 넣고 시작). 8799번부터 빈 포트를 찾아 주소를 알려준다
-uv run pytest                          # 테스트 96개
+uv run pytest                          # 테스트 97개
 ```
 
 화면의 "합성 재고표로 해보기"를 누르면 오늘 예상 재고로 손글씨 재고표를 만들어 Claude가 읽는다. 홈에서 가게 메모를 추가하면 발주 에이전트가 반영하고, 발주 화면에 참고한 과거 기록이 나온다. 과거 기록 검색용 임베딩 모델(약 0.5GB)은 처음 쓸 때 `.cache/models`에 받는다. 받지 않으려면 `--no-rag`.
@@ -207,4 +215,4 @@ uv run fresh-stock simulate --policy seasonal --out out/                    # �
 
 ## 기술
 
-Python 3.12, uv, FastAPI, Jinja2, SQLite, Pillow, fastembed(로컬 다국어 임베딩), NumPy, Anthropic Python SDK, Claude Code CLI, pytest (96개).
+Python 3.12, uv, FastAPI, Jinja2, SQLite, Pillow, fastembed(로컬 다국어 임베딩), NumPy, Anthropic Python SDK, Claude Code CLI, pytest (97개).

@@ -24,6 +24,7 @@
 <form method="post" action="/sheet/confirm">
 <div class="card" style="padding:6px 8px">
   <table>
+    <colgroup><col><col class="item-col"><col class="qty-col"></colgroup>
     <tr><th>적힌 글자</th><th>품목</th><th class="num">재고</th></tr>
     {% for r in rows %}
       {% set typed = entered.get(r.idx) %}
@@ -49,6 +50,7 @@
 <div class="card">
   <b>빠진 품목 추가</b>
   <table>
+    <colgroup><col><col class="qty-col"></colgroup>
     {% for k in range(3) %}
       {% set idx = rows | length + k %}
       {% set typed = entered.get(idx) %}

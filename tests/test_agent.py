@@ -133,6 +133,6 @@ def test_prompt_includes_store_notes():
 
 
 def test_summary_tag_fragments_are_removed():
-    llm = ScriptedLLM([_submit(summary="생강을 늘렸습니다.</summary>")])
+    llm = ScriptedLLM([_submit(summary="생강을 늘렸습니다.</summary>\n</invoke>")])
     r = _run(llm, days=2)
     assert r.policy.summaries[0][1] == "생강을 늘렸습니다."

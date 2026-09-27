@@ -9,6 +9,7 @@
 {% else %}
 <div class="card" style="padding:6px 8px">
   <table>
+    <colgroup><col><col style="width:3em"><col style="width:4.5em"><col style="width:7.5em"><col style="width:3em"></colgroup>
     <tr><th>용도</th><th class="num">호출</th><th class="num">평균 시간</th><th class="num">입력/출력 토큰</th><th class="num">실패</th></tr>
     {% for kind, k in kinds | dictsort %}
       <tr><td>{{ {'sheet': '재고표 읽기', 'order': '발주 에이전트', 'greeting': '문자 인사말'}.get(kind, kind) }}</td>
@@ -20,6 +21,7 @@
 <h2>최근 호출</h2>
 <div class="card" style="padding:6px 8px">
   <table>
+    <colgroup><col style="width:6.5em"><col><col style="width:4.5em"><col style="width:5em"></colgroup>
     <tr><th>시각</th><th>용도</th><th class="num">시간</th><th>결과</th></tr>
     {% for c in calls %}
       <tr class="{{ 'warn' if c.error }}">

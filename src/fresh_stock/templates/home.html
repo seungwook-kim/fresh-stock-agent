@@ -39,6 +39,7 @@
 <div class="card">
   <p class="muted" style="margin-top:0">추정 매출은 재고표로 역산한 판매량 × 가격이에요 (떨이는 할인가). 차이가 크면 할인이나 기록 실수가 있었을 수 있어요.</p>
   <table>
+    <colgroup><col style="width:4.5em"><col><col><col style="width:5.5em"></colgroup>
     <tr><th>날짜</th><th class="num">실제 (현금+카드)</th><th class="num">추정</th><th class="num">차이</th></tr>
     {% for r in revenue %}
       <tr><td>{{ r.day | day }}</td><td class="num">{{ r.actual | won }}</td><td class="num">{{ r.estimated | won }}</td>

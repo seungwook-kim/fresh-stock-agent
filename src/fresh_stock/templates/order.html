@@ -35,14 +35,14 @@
   <h2>{{ supplier.name }} <span class="muted">· {{ supplier.channel }}</span></h2>
   <div class="card" style="padding:6px 8px">
     <table>
+      <colgroup><col><col class="num-col"><col class="num-col"><col class="qty-col"></colgroup>
       <tr><th>품목</th><th class="num">재고</th><th class="num">추천</th><th class="num">발주</th></tr>
       {% for ln in lines %}
         {% set item = catalog.item(ln.item_id) %}
         <tr class="{{ 'warn' if ln.item_id in warnings }}">
           <td>{{ item.name }} <span class="muted">{{ item.unit }}</span>
-            {% if ln.reason %}<div class="reason">{{ ln.reason }}<br>
-              수요 {{ ln.factors }} ·
-              {% if ln.recommended == ln.base %}남은 재고로 충분해 발주 그대로{% else %}규칙 {{ ln.base }} → {{ ln.recommended }}{% endif %}</div>{% endif %}
+            {# 분류 단위 조정은 여러 줄에 같은 이유가 붙으므로, 수량이 실제로 바뀐 줄에만 이유를 보여준다 #}
+            {% if ln.reason and ln.recommended != ln.base %}<div class="reason">규칙 {{ ln.base }} → {{ ln.recommended }} · 수요 {{ ln.factors }}<br>{{ ln.reason }}</div>{% endif %}
             {% if ln.item_id in warnings %}<div class="warning">{{ warnings[ln.item_id] }}</div>{% endif %}</td>
           <td class="num">{{ '%g' % stock.get(ln.item_id, 0) }}</td>
           <td class="num">{{ ln.recommended }}</td>
