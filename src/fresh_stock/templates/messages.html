@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% set active = "messages" %}
+{% block title %}거래처 문자{% endblock %}
+{% block content %}
+<h1>거래처 문자</h1>
+{% if not messages %}
+  <div class="card">승인된 발주가 없어요. <a href="/">홈으로</a></div>
+{% else %}
+<p class="muted" style="margin-top:-6px">{{ messages[0].arrival | day }} 입고분 · 품목과 수량은 승인한 발주 그대로예요.
+  {% if greeting %}<a href="/messages?day={{ day.isoformat() }}">인사말 빼기</a>
+  {% else %}<a href="/messages?day={{ day.isoformat() }}&greeting=true" onclick="document.getElementById('loading').classList.add('on')">Claude 인사말 넣기</a>{% endif %}</p>
+{% for m in messages %}
+  <div class="card">
+    <div class="row" style="justify-content:space-between; margin-bottom:8px">
+      <b>{{ m.supplier.name }} <span class="muted">· {{ m.supplier.channel }}</span></b>
+      <button class="btn small secondary" type="button" onclick="copyText(this, 'msg-{{ loop.index }}')">복사</button>
+    </div>
+    <pre class="msg" id="msg-{{ loop.index }}">{{ m.text }}</pre>
+  </div>
+{% endfor %}
+<a class="btn block secondary" href="/">홈으로</a>
+{% endif %}
+<script>
+  function copyText(button, id) {
+    navigator.clipboard.writeText(document.getElementById(id).textContent).then(function () {
+      button.textContent = "복사됨";
+      setTimeout(function () { button.textContent = "복사"; }, 1500);
+    });
+  }
+</script>
+{% endblock %}

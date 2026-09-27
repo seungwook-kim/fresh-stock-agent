@@ -5,6 +5,7 @@
     fresh-stock compare --days 30 --policies seasonal,agent
     fresh-stock messages --date 2026-09-21 --llm
     fresh-stock eval-sheets --n 10
+    fresh-stock serve --demo
 """
 
 import argparse
@@ -101,6 +102,28 @@ def _eval_sheets(args: argparse.Namespace) -> None:
             f"입력 {sum(c.input_tokens for c in calls):,} / 출력 {sum(c.output_tokens for c in calls):,} 토큰"
         )
     print(f"장별 결과: {args.out.resolve()}")
+
+
+def _serve(args: argparse.Namespace) -> None:
+    import uvicorn
+
+    from .demo import seed_demo
+    from .service import StoreService
+    from .store import Store
+    from .web import create_app
+
+    store = Store(args.db)
+    catalog, calendar = load_catalog(), MarketCalendar()
+    if args.demo and store.last_closed_day() is None:
+        first = seed_demo(store, catalog, calendar, args.start, args.days, args.seed)
+        print(f"데모 기록 {args.days}일을 넣었습니다. {first} 마감 재고표부터 시작합니다.")
+
+    def llm_factory() -> ClaudeCodeClient:
+        return ClaudeCodeClient(model=args.model, effort=args.effort, log_path=args.llm_log)
+
+    app = create_app(StoreService(store, catalog, calendar, llm_factory, args.store_name))
+    print(f"http://{args.host}:{args.port} 에서 열립니다.")
+    uvicorn.run(app, host=args.host, port=args.port, log_level="warning")
 
 
 def _won(v: int) -> str:
@@ -202,8 +225,19 @@ def main() -> None:
     ev.add_argument("--dry-run", action="store_true", help="이미지만 만들고 인식은 하지 않는다")
     _add_sim_args(ev)
 
+    srv = sub.add_parser("serve", help="모바일 웹 화면을 띄운다")
+    srv.add_argument("--db", type=Path, default=Path("out/store.db"))
+    srv.add_argument("--demo", action="store_true", help="빈 DB면 시뮬레이션 기록을 넣고 시작한다")
+    srv.add_argument("--store-name", default="우리가게")
+    srv.add_argument("--host", default="127.0.0.1")
+    srv.add_argument("--port", type=int, default=8000)
+    _add_sim_args(srv)
+    srv.set_defaults(days=60, llm_log=Path("out/llm_web.jsonl"))
+
     args = parser.parse_args()
-    if args.command == "eval-sheets":
+    if args.command == "serve":
+        _serve(args)
+    elif args.command == "eval-sheets":
         _eval_sheets(args)
     elif args.command == "messages":
         _print_messages(args)

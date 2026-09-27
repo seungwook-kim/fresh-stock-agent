@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% set active = "sheet" %}
+{% block title %}마감 재고표{% endblock %}
+{% block content %}
+<h1>{{ day | day }} 마감 재고표</h1>
+{% if error %}<div class="alert">{{ error }}</div>{% endif %}
+{% if step != "sheet" %}
+  <div class="card">{{ status_day | day }} 발주가 아직 남아 있어요. <a href="/order">발주 확인하기</a></div>
+{% else %}
+<div class="card">
+  <form method="post" action="/sheet" enctype="multipart/form-data" data-loading="Claude가 재고표를 읽는 중이에요. 20초 정도 걸려요.">
+    <p style="margin-top:0">평소처럼 종이에 적은 마감 재고표를 찍어 올려 주세요.</p>
+    <input type="file" name="photo" accept="image/*" capture="environment" required style="width:100%; margin-bottom:12px">
+    <button class="btn block">사진 올리고 읽기</button>
+  </form>
+</div>
+<div class="card">
+  <form method="post" action="/sheet/demo" data-loading="합성 재고표를 만들고 Claude가 읽는 중이에요. 20초 정도 걸려요.">
+    <p style="margin-top:0" class="muted">데모: 사진이 없으면 오늘 예상 재고로 손글씨 폰트 재고표를 만들어 읽어요.</p>
+    <button class="btn secondary block">합성 재고표로 해보기</button>
+  </form>
+</div>
+{% if has_rows %}
+  <p><a href="/sheet/review">읽어 둔 결과 확인하기</a></p>
+{% endif %}
+{% endif %}
+{% endblock %}

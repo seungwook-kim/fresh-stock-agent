@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+{% set active = "home" %}
+{% block title %}홈{% endblock %}
+{% block content %}
+<div class="card">
+  {% if step == "sheet" %}
+    <h1>{{ status_day | day }} 마감 재고표를 올릴 차례예요</h1>
+    <p class="muted">마감 재고표를 사진으로 찍어 올리면 Claude가 읽고, 확인이 필요한 칸만 표시해 드려요.</p>
+    <a class="btn block" href="/sheet">마감 재고표 올리기</a>
+  {% else %}
+    <h1>{{ status_day | day }} 발주를 확인할 차례예요</h1>
+    <p class="muted">마감 재고로 다음 입고분 발주 추천을 만들었어요. 확인하고 승인하면 거래처 문자가 만들어져요.</p>
+    <a class="btn block" href="/order">발주 확인하기</a>
+  {% endif %}
+  {% if last_plan %}
+    <p style="margin:12px 0 0"><a href="/messages?day={{ last_plan.order_day.isoformat() }}">{{ last_plan.arrival | day }} 입고분 거래처 문자 다시 보기</a></p>
+  {% endif %}
+</div>
+
+<h2>가게 메모</h2>
+<div class="card">
+  <p class="muted" style="margin-top:0">날씨 예보, 명절, TV 방송처럼 평소와 다를 일을 적어 두면 발주 에이전트가 참고해요.</p>
+  {% for note_id, d, text in notes %}
+    <div class="row" style="justify-content:space-between; border-bottom:1px solid var(--line); padding:6px 0">
+      <span><b>{{ d | day }}</b> {{ text }}</span>
+      <form method="post" action="/notes/{{ note_id }}/delete"><button class="btn small secondary">삭제</button></form>
+    </div>
+  {% else %}
+    <p class="muted">앞으로 예정된 메모가 없어요.</p>
+  {% endfor %}
+  <form method="post" action="/notes" class="row" style="margin-top:10px">
+    <input type="date" name="day" value="{{ default_note_day }}" required>
+    <input type="text" name="text" placeholder="예: 비 예보, TV에서 양배추 효능 소개" style="flex:1; min-width:180px" required>
+    <button class="btn small">추가</button>
+  </form>
+</div>
+
+<h2>최근 매출</h2>
+<div class="card">
+  <p class="muted" style="margin-top:0">추정 매출은 재고표로 역산한 판매량 × 가격이에요 (떨이는 할인가). 차이가 크면 할인이나 기록 실수가 있었을 수 있어요.</p>
+  <table>
+    <tr><th>날짜</th><th class="num">실제 (현금+카드)</th><th class="num">추정</th><th class="num">차이</th></tr>
+    {% for r in revenue %}
+      <tr><td>{{ r.day | day }}</td><td class="num">{{ r.actual | won }}</td><td class="num">{{ r.estimated | won }}</td>
+          <td class="num">{{ r.gap | won }}</td></tr>
+    {% else %}
+      <tr><td colspan="4" class="muted">아직 기록이 없어요.</td></tr>
+    {% endfor %}
+  </table>
+</div>
+
+<h2>재고표 인식 기록</h2>
+<div class="card">
+  <p class="muted" style="margin-top:0">확인 화면에서 확정한 줄 중 Claude가 읽은 값을 고친 줄이에요. 실제 인식률을 추적하는 데 써요.</p>
+  {% for label, value in corrections.items() %}
+    <div class="row" style="justify-content:space-between"><span>{{ label }}</span><b>{{ value }}</b></div>
+  {% endfor %}
+</div>
+{% endblock %}

@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}fresh-stock{% endblock %} · {{ store_name }}</title>
+<style>
+  :root {
+    --bg: #f6f5f1; --card: #ffffff; --ink: #1d1f1c; --muted: #6b6f68; --line: #e3e1da;
+    --accent: #2f6b3a; --accent-ink: #ffffff; --flag: #fff3c4; --flag-line: #e7c95a;
+    --warn: #fde7e4; --warn-ink: #9b2c1f; --agent: #e8f1ea;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink);
+         font: 16px/1.5 -apple-system, "Apple SD Gothic Neo", "Malgun Gothic", "Noto Sans KR", sans-serif; }
+  header { background: var(--accent); color: var(--accent-ink); padding: 12px 16px; }
+  header a { color: inherit; text-decoration: none; }
+  header .brand { font-weight: 700; }
+  nav { display: flex; gap: 4px; overflow-x: auto; padding: 8px 12px; background: var(--card);
+        border-bottom: 1px solid var(--line); }
+  nav a { padding: 6px 12px; border-radius: 999px; color: var(--ink); text-decoration: none; white-space: nowrap; }
+  nav a.on { background: var(--agent); font-weight: 600; }
+  main { max-width: 760px; margin: 0 auto; padding: 16px; }
+  h1 { font-size: 1.3rem; margin: 4px 0 12px; }
+  h2 { font-size: 1.05rem; margin: 20px 0 8px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; margin-bottom: 12px; }
+  .muted { color: var(--muted); font-size: .9rem; }
+  .btn { display: inline-block; border: 0; border-radius: 10px; padding: 12px 18px; font: inherit; font-weight: 600;
+         background: var(--accent); color: var(--accent-ink); text-decoration: none; cursor: pointer; }
+  .btn.secondary { background: var(--card); color: var(--ink); border: 1px solid var(--line); }
+  .btn.small { padding: 6px 12px; font-size: .9rem; }
+  .btn.block { display: block; width: 100%; text-align: center; }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  input, select, textarea { font: inherit; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: #fff; }
+  table { width: 100%; border-collapse: collapse; }
+  th, td { padding: 8px 6px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+  th { font-size: .85rem; color: var(--muted); font-weight: 600; }
+  td.num, th.num { text-align: right; white-space: nowrap; }
+  tr.flag td { background: var(--flag); }
+  tr.warn td { background: var(--warn); }
+  .flags { font-size: .82rem; color: #7a5c00; }
+  .warning { font-size: .85rem; color: var(--warn-ink); }
+  .reason { font-size: .82rem; color: var(--accent); }
+  .alert { background: var(--warn); color: var(--warn-ink); border-radius: 10px; padding: 10px 14px; margin-bottom: 12px; }
+  .note { background: var(--agent); border-radius: 10px; padding: 10px 14px; margin-bottom: 12px; }
+  .qty { width: 5.2em; text-align: right; }
+  pre.msg { white-space: pre-wrap; font: inherit; margin: 0; background: #faf9f6; border: 1px solid var(--line);
+            border-radius: 8px; padding: 10px 12px; }
+  img.sheet { width: 100%; border-radius: 8px; border: 1px solid var(--line); }
+  #loading { display: none; position: fixed; inset: 0; background: rgba(20, 24, 20, .55); color: #fff;
+             align-items: center; justify-content: center; text-align: center; padding: 24px; font-size: 1.05rem; z-index: 10; }
+  #loading.on { display: flex; }
+</style>
+</head>
+<body>
+<header><a class="brand" href="/">fresh-stock</a> <span class="muted" style="color:#d8e6da">· {{ store_name }}</span></header>
+<nav>
+  <a href="/" class="{{ 'on' if active == 'home' }}">홈</a>
+  <a href="/sheet" class="{{ 'on' if active == 'sheet' }}">마감 재고표</a>
+  {% if step == 'order' %}<a href="/order" class="{{ 'on' if active == 'order' }}">발주</a>{% endif %}
+</nav>
+<main>
+{% block content %}{% endblock %}
+</main>
+<div id="loading"><div id="loading-text">처리하는 중...</div></div>
+<script>
+  document.querySelectorAll("form[data-loading]").forEach(function (form) {
+    form.addEventListener("submit", function () {
+      document.getElementById("loading-text").textContent = form.dataset.loading;
+      document.getElementById("loading").classList.add("on");
+    });
+  });
+</script>
+</body>
+</html>

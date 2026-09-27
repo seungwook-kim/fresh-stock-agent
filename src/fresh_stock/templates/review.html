@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+{% set active = "sheet" %}
+{% block title %}재고표 확인{% endblock %}
+{% macro item_select(name, selected) %}
+  <select name="{{ name }}" style="max-width:9.5em">
+    <option value="">품목 선택</option>
+    {% for item in catalog.items %}
+      <option value="{{ item.id }}" {{ 'selected' if item.id == selected }}>{{ item.name }} ({{ item.unit }})</option>
+    {% endfor %}
+  </select>
+{% endmacro %}
+{% block content %}
+<h1>{{ day | day }} 재고표 확인</h1>
+{% if error %}<div class="alert">{{ error }}</div>{% endif %}
+<div class="note">
+  {{ rows | length }}줄을 읽었어요.
+  {% if flagged %}<b>노란 줄 {{ flagged }}개</b>만 사진과 비교해 확인해 주세요.{% else %}확인이 필요한 줄은 없어요.{% endif %}
+  수량은 <code>4.5</code>, <code>4반</code>처럼 적어도 돼요.
+</div>
+<details class="card"><summary>재고표 사진 보기</summary>
+  <img class="sheet" src="/sheet/image/{{ day.isoformat() }}" alt="{{ day | day }} 마감 재고표">
+</details>
+
+<form method="post" action="/sheet/confirm">
+<div class="card" style="padding:6px 8px">
+  <table>
+    <tr><th>적힌 글자</th><th>품목</th><th class="num">재고</th></tr>
+    {% for r in rows %}
+      <tr class="{{ 'flag' if r.flags }}">
+        <td>{{ r.raw_name }} <b>{{ r.raw_qty }}</b>
+          {% if r.flags %}<div class="flags">{{ r.flags | join(' · ') }}</div>{% endif %}</td>
+        <td>{{ item_select('item_%d' % r.idx, r.item_id_read) }}</td>
+        <td class="num"><input class="qty" name="qty_{{ r.idx }}" value="{{ '%g' % r.qty_read if r.qty_read is not none else r.raw_qty }}"></td>
+      </tr>
+    {% endfor %}
+  </table>
+</div>
+
+{% if missing %}
+<div class="card">
+  <b>재고표에 없는 품목</b>
+  <p class="muted" style="margin:4px 0">아래 품목은 표에 없어서 재고 0으로 저장돼요. 남아 있을 품목이 있으면 아래에 추가해 주세요.</p>
+  <p style="margin:0">{% for item in missing %}{{ item.name }} (최대 {{ '%g' % max_possible[item.id] }}{{ item.unit }}){{ ', ' if not loop.last }}{% endfor %}</p>
+</div>
+{% endif %}
+
+<div class="card">
+  <b>빠진 품목 추가</b>
+  <table>
+    {% for k in range(3) %}
+      {% set idx = rows | length + k %}
+      <tr><td>{{ item_select('item_%d' % idx, None) }}</td>
+          <td class="num"><input class="qty" name="qty_{{ idx }}" placeholder="수량"></td></tr>
+    {% endfor %}
+  </table>
+</div>
+
+<div class="card">
+  <b>오늘 매출</b>
+  <div class="row" style="margin-top:8px">
+    <label>돈통 현금 <input name="cash" inputmode="numeric" placeholder="0" style="width:9em"></label>
+    <label>카드 합계 <input name="card" inputmode="numeric" placeholder="0" style="width:9em"></label>
+  </div>
+</div>
+<button class="btn block">재고 확정</button>
+</form>
+{% endblock %}

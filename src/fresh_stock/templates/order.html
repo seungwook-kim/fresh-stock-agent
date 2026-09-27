@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% set active = "order" %}
+{% block title %}발주{% endblock %}
+{% block content %}
+<h1>{{ plan.arrival | day }} 입고분 발주</h1>
+<p class="muted" style="margin-top:-6px">{{ day | day }} 마감 재고 기준 · 버틸 날 {{ plan.arrival | day }}{% if notes %} · 메모 {{ notes | length }}일{% endif %}</p>
+
+{% if notes %}
+<div class="note">
+  <b>가게 메모</b>
+  {% for d, texts in notes | dictsort %}{% for t in texts %}<div>{{ d | day }} {{ t }}</div>{% endfor %}{% endfor %}
+</div>
+{% endif %}
+<div class="card"><b>발주 에이전트</b><div>{{ plan.summary }}</div></div>
+
+{% if warnings %}
+<div class="alert">
+  <b>확인이 필요한 수량이 {{ warnings | length }}개 있어요.</b> 빨간 줄을 확인하고, 맞으면 아래 체크 후 승인해 주세요.
+</div>
+{% endif %}
+
+<form method="post" action="/order">
+{% for supplier, lines in groups %}
+  <h2>{{ supplier.name }} <span class="muted">· {{ supplier.channel }}</span></h2>
+  <div class="card" style="padding:6px 8px">
+    <table>
+      <tr><th>품목</th><th class="num">재고</th><th class="num">추천</th><th class="num">발주</th></tr>
+      {% for ln in lines %}
+        {% set item = catalog.item(ln.item_id) %}
+        <tr class="{{ 'warn' if ln.item_id in warnings }}">
+          <td>{{ item.name }} <span class="muted">{{ item.unit }}</span>
+            {% if ln.reason %}<div class="reason">규칙 {{ ln.base }} → {{ ln.recommended }} · {{ ln.reason }}</div>{% endif %}
+            {% if ln.item_id in warnings %}<div class="warning">{{ warnings[ln.item_id] }}</div>{% endif %}</td>
+          <td class="num">{{ '%g' % stock.get(ln.item_id, 0) }}</td>
+          <td class="num">{{ ln.recommended }}</td>
+          <td class="num"><input class="qty" name="final_{{ ln.item_id }}" inputmode="numeric" value="{{ entered.get(ln.item_id, ln.final) }}"></td>
+        </tr>
+      {% endfor %}
+    </table>
+  </div>
+{% endfor %}
+{% if warnings %}
+  <label class="card" style="display:block"><input type="checkbox" name="confirmed" value="yes"> 빨간 줄 수량을 확인했고 이대로 발주합니다</label>
+{% endif %}
+<button class="btn block">발주 승인하고 거래처 문자 만들기</button>
+</form>
+<form method="post" action="/order/refresh" style="margin-top:10px" data-loading="발주 추천을 다시 만드는 중이에요.">
+  <button class="btn secondary block">메모 반영해서 추천 다시 만들기</button>
+</form>
+{% endblock %}
