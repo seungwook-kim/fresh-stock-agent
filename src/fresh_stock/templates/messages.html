@@ -8,7 +8,7 @@
 {% else %}
 <p class="muted" style="margin-top:-6px">{{ messages[0].arrival | day }} 입고분 · 품목과 수량은 승인한 발주 그대로예요.
   {% if greeting %}<a href="/messages?day={{ day.isoformat() }}">인사말 빼기</a>
-  {% else %}<a href="/messages?day={{ day.isoformat() }}&greeting=true" onclick="document.getElementById('loading').classList.add('on')">Claude 인사말 넣기</a>{% endif %}</p>
+  {% else %}<a href="/messages?day={{ day.isoformat() }}&greeting=true" onclick="document.getElementById('loading').classList.add('on')">AI 인사말 넣기</a>{% endif %}</p>
 {% for m in messages %}
   <div class="card">
     <div class="row" style="justify-content:space-between; margin-bottom:8px">

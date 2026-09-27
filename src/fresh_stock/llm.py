@@ -68,6 +68,7 @@ class ClaudeCodeClient:
     effort: str | None = "low"  # 추론 강도. 발주 조정처럼 짧은 판단은 low로 충분하다
     timeout: float = 300
     log_path: Path | None = None  # 지정하면 호출마다 JSONL로 남긴다
+    web_search: bool = False  # 켜면 Claude Code의 WebSearch 도구만 허용한다 (건강 기사·방송 찾기)
     calls: list[LLMCall] = field(default_factory=list)
 
     def generate_json(
@@ -85,7 +86,7 @@ class ClaudeCodeClient:
         cmd = [
             exe, "-p",
             "--safe-mode", "--strict-mcp-config", "--no-session-persistence",
-            "--tools", "",
+            *(["--tools", "WebSearch", "--allowedTools", "WebSearch"] if self.web_search else ["--tools", ""]),
             "--model", self.model,
             "--system-prompt", system,
             "--json-schema", json.dumps(schema, ensure_ascii=False),
@@ -264,11 +265,22 @@ class AnthropicClient:
         return output
 
 
-def make_llm(backend: str, model: str | None, effort: str | None, log_path: Path | None) -> LLMClient:
-    """backend: "claude-code" (로컬 Claude Code CLI, 기본) 또는 "anthropic" (API)."""
+def make_llm(
+    backend: str, model: str | None, effort: str | None, log_path: Path | None, web_search: bool = False
+) -> LLMClient:
+    """backend: "claude-code" (로컬 Claude Code CLI, 기본) 또는 "anthropic" (API).
+
+    web_search는 지금 claude-code 백엔드에서만 지원한다.
+    """
     if backend == "anthropic":
+        if web_search:
+            raise ValueError("웹 검색은 지금 claude-code 백엔드에서만 지원합니다.")
         api_model = API_MODEL_ALIASES.get(model or "opus", model or "claude-opus-5")
         return AnthropicClient(model=api_model, effort=effort, log_path=log_path)
     if backend == "claude-code":
-        return ClaudeCodeClient(model=model or "sonnet", effort=effort, log_path=log_path)
+        # 웹 검색은 여러 번 찾아보느라 3~4분 걸리므로 시간 제한을 넉넉히 둔다
+        timeout = 600 if web_search else 300
+        return ClaudeCodeClient(
+            model=model or "sonnet", effort=effort, log_path=log_path, web_search=web_search, timeout=timeout
+        )
     raise ValueError(f"알 수 없는 LLM 백엔드: {backend}")

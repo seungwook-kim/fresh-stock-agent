@@ -5,6 +5,7 @@
 
 import json
 import random
+import threading
 from datetime import date, timedelta
 from pathlib import Path
 from urllib.parse import urlencode
@@ -48,7 +49,10 @@ def create_app(service: StoreService, llm_log: Path | None = None) -> FastAPI:
     templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
     templates.env.filters["day"] = _fmt_day
     templates.env.filters["won"] = _won
+    templates.env.globals["timedelta1"] = timedelta(days=1)
     catalog = service.catalog
+    # AI 건강 기사·방송 찾기는 몇 분 걸려서 백그라운드로 돌리고 상태만 들고 있는다
+    news_job: dict = {"status": "idle", "day": None, "items": [], "error": None}
 
     def render(request: Request, name: str, **context):
         step, day = service.status()
@@ -64,7 +68,7 @@ def create_app(service: StoreService, llm_log: Path | None = None) -> FastAPI:
     # 홈 ---------------------------------------------------------------------------
 
     @app.get("/")
-    def home(request: Request):
+    def home(request: Request, auto: int | None = None, auto_error: str = ""):
         _, day = service.status()
         last = service.store.last_closed_day()
         last_plan = None
@@ -83,7 +87,36 @@ def create_app(service: StoreService, llm_log: Path | None = None) -> FastAPI:
             aliases=service.learned_aliases(),
             last_plan=last_plan,
             default_note_day=(day + timedelta(days=1)).isoformat(),
+            auto=auto,
+            auto_error=auto_error,
+            news=news_job,
+            can_search=service.search_llm_factory is not None,
         )
+
+    @app.post("/notes/auto")
+    def auto_notes():
+        _, day = service.status()
+        added, error = service.refresh_auto_notes(day)
+        params = {"auto": len(added)}
+        if error:
+            params["auto_error"] = error
+        return go("/?" + urlencode(params))
+
+    @app.post("/notes/news")
+    def search_news():
+        if news_job["status"] == "running":
+            return go("/")
+        _, day = service.status()
+        news_job.update(status="running", day=day, items=[], error=None)
+
+        def run():
+            try:
+                news_job.update(status="done", items=service.find_food_news(day))
+            except Exception as e:  # 백그라운드 작업이라 실패를 화면에 보여준다
+                news_job.update(status="error", error=str(e)[:200])
+
+        threading.Thread(target=run, daemon=True).start()
+        return go("/")
 
     @app.post("/notes")
     def add_note(day: date = Form(...), text: str = Form(...)):

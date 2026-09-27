@@ -1,8 +1,8 @@
 {% extends "base.html" %}
 {% set active = "logs" %}
-{% block title %}LLM 기록{% endblock %}
+{% block title %}AI 기록{% endblock %}
 {% block content %}
-<p><a href="/logs">← LLM 기록</a></p>
+<p><a href="/logs">← AI 기록</a></p>
 <h1>{{ call.purpose }}</h1>
 <p class="muted" style="margin-top:-6px">{{ call.at or '-' }} · {{ '%.1f' % call.seconds }}초 ·
   입력 {{ '{:,}'.format(call.input_tokens) }} / 출력 {{ '{:,}'.format(call.output_tokens) }} 토큰

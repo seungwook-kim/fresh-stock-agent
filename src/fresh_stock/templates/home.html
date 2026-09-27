@@ -5,7 +5,7 @@
 <div class="card">
   {% if step == "sheet" %}
     <h1>{{ status_day | day }} 마감 재고표를 올릴 차례예요</h1>
-    <p class="muted">마감 재고표를 사진으로 찍어 올리면 Claude가 읽고, 확인이 필요한 칸만 표시해 드려요.</p>
+    <p class="muted">마감 재고표를 사진으로 찍어 올리면 AI가 읽고, 확인이 필요한 칸만 표시해 드려요.</p>
     <a class="btn block" href="/sheet">마감 재고표 올리기</a>
   {% else %}
     <h1>{{ status_day | day }} 발주를 확인할 차례예요</h1>
@@ -19,7 +19,9 @@
 
 <h2>가게 메모</h2>
 <div class="card">
-  <p class="muted" style="margin-top:0">날씨 예보, 명절, TV 방송처럼 평소와 다를 일을 적어 두면 발주 에이전트가 참고해요.</p>
+  <p class="muted" style="margin-top:0">날씨 예보, 명절, TV 방송처럼 평소와 다를 일을 적어 두면 발주 에이전트가 참고해요.
+    날씨와 명절은 발주 추천을 만들 때 자동으로 가져와요.</p>
+  {% if auto is not none %}<div class="note">날씨·명절 메모 {{ auto }}개를 새로 넣었어요.{% if auto_error %} {{ auto_error }}{% endif %}</div>{% endif %}
   {% for note_id, d, text in notes %}
     <div class="row" style="justify-content:space-between; border-bottom:1px solid var(--line); padding:6px 0">
       <span><b>{{ d | day }}</b> {{ text }}</span>
@@ -33,6 +35,30 @@
     <input type="text" name="text" placeholder="예: 비 예보, TV에서 양배추 효능 소개" style="flex:1; min-width:180px" required>
     <button class="btn small">추가</button>
   </form>
+  <div class="row" style="margin-top:10px">
+    <form method="post" action="/notes/auto" data-loading="날씨와 명절을 가져오는 중이에요."><button class="btn small secondary">날씨·명절 가져오기</button></form>
+    {% if can_search %}<form method="post" action="/notes/news"><button class="btn small secondary" {{ 'disabled' if news.status == 'running' }}>AI로 건강 기사·방송 찾기</button></form>{% endif %}
+  </div>
+  {% if news.status == 'running' %}
+    <meta http-equiv="refresh" content="15">
+    <p class="muted">AI가 최근 건강 기사와 방송을 찾는 중이에요 (3~4분). 이 화면은 15초마다 새로고침돼요.</p>
+  {% elif news.status == 'error' %}
+    <p class="warning">건강 기사·방송을 찾지 못했어요: {{ news.error }}</p>
+  {% elif news.status == 'done' %}
+    <div style="margin-top:10px"><b>AI가 찾은 제안</b> <span class="muted">· 확인하고 맞으면 메모로 추가하세요</span></div>
+    {% for n in news['items'] %}
+      <div class="row" style="justify-content:space-between; border-bottom:1px solid var(--line); padding:6px 0">
+        <span>{{ n.note() }}<br><a class="muted" href="{{ n.url }}" target="_blank" rel="noopener">{{ n.title }}</a></span>
+        <form method="post" action="/notes">
+          <input type="hidden" name="day" value="{{ (news.day + timedelta1).isoformat() }}">
+          <input type="hidden" name="text" value="{{ n.note() }}">
+          <button class="btn small">메모로 추가</button>
+        </form>
+      </div>
+    {% else %}
+      <p class="muted">최근 기사·방송에서 우리 품목은 찾지 못했어요.</p>
+    {% endfor %}
+  {% endif %}
 </div>
 
 <h2>최근 매출</h2>
@@ -52,12 +78,12 @@
 
 <h2>재고표 인식 기록</h2>
 <div class="card">
-  <p class="muted" style="margin-top:0">확인 화면에서 확정한 줄 중 Claude가 읽은 값을 고친 줄이에요. 실제 인식률을 추적하는 데 써요.</p>
+  <p class="muted" style="margin-top:0">확인 화면에서 확정한 줄 중 AI가 읽은 값을 고친 줄이에요. 실제 인식률을 추적하는 데 써요.</p>
   {% for label, value in corrections.items() %}
     <div class="row" style="justify-content:space-between"><span>{{ label }}</span><b>{{ value }}</b></div>
   {% endfor %}
   <div style="margin-top:10px"><b>익힌 줄임말 {{ aliases | length }}개</b>
-    <span class="muted">· 다음 재고표부터 Claude에게 알려주고, 결과와 다르면 표시해요</span></div>
+    <span class="muted">· 다음 재고표부터 AI에게 알려주고, 결과와 다르면 표시해요</span></div>
   {% if aliases %}<p class="muted" style="margin:4px 0 0">
     {% for raw, item_id in aliases | dictsort %}{{ raw }} → {{ catalog.item(item_id).name }}{{ ', ' if not loop.last }}{% endfor %}</p>{% endif %}
 </div>

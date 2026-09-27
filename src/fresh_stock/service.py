@@ -10,10 +10,12 @@ from statistics import mean
 
 from .accounting import clearance_estimate, regular_sales_series
 from .agent import AgentPolicy
+from .auto_notes import HEAT_PREFIX, RAIN_PREFIX, AutoNote, WeatherSource, collect
 from .catalog import Catalog
 from .llm import ImageInput, LLMClient
 from .market_calendar import MarketCalendar
 from .memory import DayMemoryBank
+from .news import FoodNews, find_food_news
 from .messages import LLMGreetingWriter, OrderMessage, build_messages
 from .ordering import OrderContext, SeasonalPolicy, check_order
 from .recognition import recognize_sheet
@@ -43,6 +45,9 @@ class StoreService:
         llm_factory: Callable[[], LLMClient] | None = None,
         store_name: str = "우리가게",
         memory: DayMemoryBank | None = None,
+        auto_notes: bool = False,
+        weather: WeatherSource | None = None,
+        search_llm_factory: Callable[[], LLMClient] | None = None,
     ):
         self.store = store
         self.catalog = catalog
@@ -50,6 +55,9 @@ class StoreService:
         self.llm_factory = llm_factory
         self.store_name = store_name
         self.memory = memory  # 과거 비슷한 날 검색 (RAG). 없으면 경험 노트만 쓴다
+        self.auto_notes = auto_notes  # 발주 추천을 만들 때 날씨·명절 메모를 먼저 가져온다
+        self.weather = weather
+        self.search_llm_factory = search_llm_factory  # 웹 검색이 되는 LLM (건강 기사·방송 찾기)
 
     # 지금 할 일 ------------------------------------------------------------------
 
@@ -153,8 +161,34 @@ class StoreService:
             note_log=note_log,
         )
 
+    def refresh_auto_notes(self, day: date, days_ahead: int = 3) -> tuple[list[AutoNote], str | None]:
+        """day 다음 날부터 days_ahead일 동안의 날씨·명절 메모를 넣는다. (새로 넣은 메모, 날씨 오류)
+
+        같은 메모는 다시 넣지 않는다. 날씨를 가져왔으면 그 기간의 이전 날씨 메모는 새 예보로 바꾼다.
+        """
+        start, end = day + timedelta(days=1), day + timedelta(days=days_ahead)
+        notes, error = collect(start, end, date.today(), self.weather)
+        if self.weather is not None and error is None:
+            fresh = {(n.day, n.text) for n in notes if n.source == "날씨"}
+            for note_id, d, text in self.store.notes(start, end):
+                if text.startswith((RAIN_PREFIX, HEAT_PREFIX)) and (d, text) not in fresh:
+                    self.store.delete_note(note_id)
+        existing = {(d, t) for _, d, t in self.store.notes(start, end)}
+        added = [n for n in notes if (n.day, n.text) not in existing]
+        for n in added:
+            self.store.add_note(n.day, n.text)
+        return added, error
+
+    def find_food_news(self, day: date) -> list[FoodNews]:
+        """AI가 웹 검색으로 최근 건강 기사·방송에서 효능이 소개된 우리 품목을 찾는다. 메모 제안용."""
+        if self.search_llm_factory is None:
+            raise RuntimeError("웹 검색이 되는 LLM이 필요합니다.")
+        return find_food_news(self.search_llm_factory(), self.catalog, day)
+
     def make_plan(self, day: date) -> OrderPlan | None:
         """발주 추천을 새로 만든다. 가게 메모가 있으면 에이전트가 조정한다."""
+        if self.auto_notes:
+            self.refresh_auto_notes(day)
         ctx = self.order_context(day)
         if ctx is None:
             return None

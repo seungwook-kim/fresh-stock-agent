@@ -191,13 +191,51 @@ def _serve(args: argparse.Namespace) -> None:
     def llm_factory() -> LLMClient:
         return _llm(args)
 
+    def search_llm_factory() -> LLMClient:
+        # 웹 검색은 low에서 일찍 포기하는 경우가 있어 medium으로 둔다
+        return make_llm(args.backend, args.model, "medium", args.llm_log, web_search=True)
+
     memory = None if args.no_rag else _memory()
-    app = create_app(StoreService(store, catalog, calendar, llm_factory, args.store_name, memory), args.llm_log)
+    service = StoreService(
+        store,
+        catalog,
+        calendar,
+        llm_factory,
+        args.store_name,
+        memory,
+        auto_notes=not args.no_auto_notes,
+        weather=_weather(),
+        search_llm_factory=search_llm_factory if args.backend == "claude-code" else None,
+    )
+    app = create_app(service, args.llm_log)
     print(f"http://{args.host}:{port} 에서 열립니다.", flush=True)
     uvicorn.run(app, host=args.host, port=port, log_level="warning")
 
 
 DEFAULT_PORT = 8799
+
+
+def _weather():
+    """가게 위치(FRESH_STOCK_LAT, FRESH_STOCK_LON, 기본 서울)의 날씨 예보."""
+    from .auto_notes import SEOUL, WeatherSource
+
+    lat = float(os.environ.get("FRESH_STOCK_LAT", SEOUL[0]))
+    lon = float(os.environ.get("FRESH_STOCK_LON", SEOUL[1]))
+    return WeatherSource(lat, lon)
+
+
+def _fetch_notes(args: argparse.Namespace) -> None:
+    from .service import StoreService
+    from .store import Store
+
+    service = StoreService(Store(args.db), load_catalog(), MarketCalendar(), weather=_weather())
+    day = args.day or date.today()
+    added, error = service.refresh_auto_notes(day, args.days)
+    print(f"{day} 다음 날부터 {args.days}일: 메모 {len(added)}개 추가")
+    for n in added:
+        print(f"  {n.day} [{n.source}] {n.text}")
+    if error:
+        print(error)
 
 
 def _port_in_use(host: str, port: int) -> bool:
@@ -359,18 +397,26 @@ def main() -> None:
     srv.add_argument("--host", default="127.0.0.1")
     srv.add_argument("--port", type=int, default=None, help="지정하지 않으면 8799번부터 빈 포트를 찾아 쓴다")
     srv.add_argument("--no-rag", action="store_true", help="과거 비슷한 날 검색을 끈다 (임베딩 모델을 받지 않는다)")
+    srv.add_argument("--no-auto-notes", action="store_true", help="발주 추천 때 날씨·명절 메모를 자동으로 가져오지 않는다")
     _add_sim_args(srv)
     srv.set_defaults(days=60, llm_log=Path("out/llm_web.jsonl"))
 
     ret = sub.add_parser("eval-retrieval", help="가게 메모 검색 방식(BM25, 임베딩, 하이브리드)을 비교한다")
     ret.add_argument("--bm25-only", action="store_true", help="임베딩 모델 없이 BM25만 잰다")
 
+    fn = sub.add_parser("fetch-notes", help="날씨·명절 메모를 가져와 넣는다 (매일 예약 실행용)")
+    fn.add_argument("--db", default=os.environ.get("FRESH_STOCK_DB", "out/store.db"))
+    fn.add_argument("--day", type=date.fromisoformat, default=None, help="기준일 (기본: 오늘)")
+    fn.add_argument("--days", type=int, default=3, help="기준일 다음 날부터 며칠치")
+
     cp = sub.add_parser("copy-db", help="저장소 데이터를 다른 DB로 옮긴다 (예: SQLite -> Supabase)")
     cp.add_argument("source", help="옮길 DB (SQLite 파일 경로 또는 postgresql:// 주소)")
     cp.add_argument("target", help="받을 빈 DB")
 
     args = parser.parse_args()
-    if args.command == "copy-db":
+    if args.command == "fetch-notes":
+        _fetch_notes(args)
+    elif args.command == "copy-db":
         _copy_db(args)
     elif args.command == "eval-retrieval":
         _eval_retrieval(args)
