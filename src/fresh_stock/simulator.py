@@ -18,7 +18,7 @@ from .ordering import OrderContext, OrderPolicy, check_order
 
 # 아래 값들은 가정값이다. 실제 매장 경험에 맞춰 조정한다.
 WEEKDAY_FACTOR = (0.9, 0.9, 0.95, 1.0, 1.1, 1.3, 1.2)  # 월~일
-MARKET_DAY_FACTOR = 1.6
+MARKET_DAY_FACTOR = 1.5  # 사장님 경험값
 DEMAND_CV = 0.3  # 수요 변동계수
 MARKDOWN_RATE = 0.5  # 떨이 판매가 비율 (정가 대비). 버리는 물건 없이 떨이로 전부 판다
 CARD_SHARE = (0.5, 0.7)  # 매출 중 카드 비중 범위
@@ -145,7 +145,8 @@ def run_simulation(
     demand = generate_demand(catalog, calendar, dates, seed, events)
     notes: dict[date, list[str]] = defaultdict(list)
     for e in events:
-        notes[e.day].append(e.note)
+        if e.note not in notes[e.day]:
+            notes[e.day].append(e.note)
     pay_rng = random.Random(seed + 1)
     result = SimulationResult(policy=policy, catalog=catalog)
 
@@ -209,7 +210,11 @@ def run_simulation(
             # 입력 실수 여부는 (seed, 날짜, 품목)으로 정해서 발주 규칙이 달라도 같은 날 같은 품목에서 난다
             typo = random.Random(f"{seed}:{d}:{item.id}").random() < typo_rate
             entered = _typo(qty) if typo else qty
-            warning = check_order(item, entered, len(ctx.cover_days), past_daily[item.id]) if guardrail else None
+            warning = (
+                check_order(item, entered, len(ctx.cover_days), past_daily[item.id], recommended=qty)
+                if guardrail
+                else None
+            )
             # 경고를 본 사람은 원래 의도한 수량으로 바로잡는다
             final = qty if warning else entered
             arrivals[arrival][item.id] = final

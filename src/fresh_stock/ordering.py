@@ -107,12 +107,19 @@ class SeasonalPolicy:
         return orders
 
 
-def check_order(item: Item, qty: int, cover_days: int, past_daily: list[float]) -> str | None:
-    """평소보다 지나치게 많은 발주 수량이면 확인 메시지를 돌려준다 (토마토 8박스 → 88박스 같은 실수).
+def check_order(
+    item: Item, qty: int, cover_days: int, past_daily: list[float], recommended: int | None = None
+) -> str | None:
+    """입력한 발주 수량이 지나치게 크면 확인 메시지를 돌려준다 (토마토 8박스 → 88박스 같은 실수).
 
-    토요일처럼 이틀 치를 받는 날이 있으므로 하루당 수량으로 환산해 비교한다.
-    past_daily는 이 품목의 지난 발주를 하루당 수량으로 적은 목록이다.
+    추천 수량이 있으면 추천과 비교한다. 명절처럼 추천 자체가 큰 날은 경고하지 않는다.
+    추천 없이 직접 넣는 발주는 지난 발주와 비교한다. 토요일처럼 이틀 치를 받는 날이 있으므로
+    하루당 수량으로 환산한다. past_daily는 이 품목의 지난 발주를 하루당 수량으로 적은 목록이다.
     """
+    if recommended:
+        if qty >= 3 * recommended and qty - recommended >= 3:
+            return f"{item.name} {qty}{item.unit}: 추천 {recommended}{item.unit}의 {qty / recommended:.1f}배입니다. 맞나요?"
+        return None
     past = [q for q in past_daily if q > 0][-10:]
     if len(past) < 3:
         return None

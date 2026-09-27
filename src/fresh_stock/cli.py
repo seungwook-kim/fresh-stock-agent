@@ -115,9 +115,9 @@ def _write_csv(result: SimulationResult, out: Path) -> None:
     if isinstance(result.policy, AgentPolicy):
         with open(out / "agent_decisions.csv", "w", newline="", encoding="utf-8-sig") as f:
             w = csv.writer(f)
-            w.writerow(["발주일", "품목", "규칙 추천", "에이전트", "이유"])
+            w.writerow(["발주일", "품목", "규칙 추천", "에이전트", "배율", "이유"])
             for dec in result.policy.decisions:
-                w.writerow([dec.day, names[dec.item_id], dec.base, dec.qty, dec.reason])
+                w.writerow([dec.day, names[dec.item_id], dec.base, dec.qty, dec.factors, dec.reason])
         with open(out / "agent_summaries.csv", "w", newline="", encoding="utf-8-sig") as f:
             w = csv.writer(f)
             w.writerow(["발주일", "요약"])
