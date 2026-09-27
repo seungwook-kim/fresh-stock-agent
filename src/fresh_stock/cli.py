@@ -10,12 +10,13 @@
 
 import argparse
 import csv
+import os
 from datetime import date
 from pathlib import Path
 
 from .agent import AgentPolicy
 from .catalog import load_catalog
-from .llm import ClaudeCodeClient
+from .llm import LLMClient, make_llm
 from .market_calendar import MarketCalendar
 from .messages import LLMGreetingWriter, build_messages
 from .ordering import POLICIES, OrderPolicy
@@ -32,14 +33,24 @@ def _add_sim_args(p: argparse.ArgumentParser) -> None:
     p.add_argument("--typo-rate", type=float, default=0.005, help="발주 입력 실수 확률 (줄마다)")
     p.add_argument("--no-guardrail", action="store_true", help="발주 수량 경고를 끈다")
     p.add_argument("--no-events", action="store_true", help="가게 메모(날씨·명절·단체 주문)를 끈다")
-    p.add_argument("--model", default="sonnet", help="에이전트가 쓸 Claude 모델 (Claude Code 모델 이름)")
+    p.add_argument(
+        "--backend",
+        choices=["claude-code", "anthropic"],
+        default=os.environ.get("FRESH_STOCK_LLM", "claude-code"),
+        help="LLM 백엔드: 로컬 Claude Code CLI(기본) 또는 Anthropic API. 환경변수 FRESH_STOCK_LLM으로도 정한다",
+    )
+    p.add_argument("--model", default=None, help="Claude 모델 (기본: claude-code는 sonnet, anthropic은 claude-opus-5)")
     p.add_argument("--effort", default="low", help="에이전트 추론 강도 (low, medium, high, xhigh, max)")
     p.add_argument("--llm-log", type=Path, default=Path("out/llm_calls.jsonl"), help="LLM 호출 기록 (JSONL)")
 
 
+def _llm(args: argparse.Namespace) -> LLMClient:
+    return make_llm(args.backend, args.model, args.effort, args.llm_log)
+
+
 def _make_policy(name: str, args: argparse.Namespace) -> OrderPolicy:
     if name == AgentPolicy.name:
-        return AgentPolicy(ClaudeCodeClient(model=args.model, effort=args.effort, log_path=args.llm_log))
+        return AgentPolicy(_llm(args))
     return POLICIES[name]()
 
 
@@ -70,7 +81,7 @@ def _print_messages(args: argparse.Namespace) -> None:
     notes = [n for d in MarketCalendar().cover_days(arrival) for n in result.notes.get(d, [])]
     writer = None
     if args.llm:
-        llm = ClaudeCodeClient(model=args.model, effort=args.effort, log_path=args.llm_log)
+        llm = _llm(args)
         writer = LLMGreetingWriter(llm, args.store_name)
     messages = build_messages(
         result.catalog, arrival, {o.item_id: o.final for o in todays}, notes, writer
@@ -90,9 +101,9 @@ def _eval_sheets(args: argparse.Namespace) -> None:
             (args.out / f"{case.day}.jpg").write_bytes(case.image)
         print(f"재고표 이미지 {len(cases)}장 저장: {args.out.resolve()}")
         return
-    llm = ClaudeCodeClient(model=args.model, effort=args.effort, log_path=args.llm_log)
+    llm = _llm(args)
     scores = run_eval(llm, result.catalog, cases, args.out, args.workers)
-    print(f"합성 재고표 인식 평가 (모델 {args.model}, 추론 강도 {args.effort})\n")
+    print(f"합성 재고표 인식 평가 ({args.backend}, 모델 {llm.model}, 추론 강도 {args.effort})\n")
     for label, value in summarize(scores).items():
         print(f"{label:<24}{value:.1%}" if isinstance(value, float) else f"{label:<24}{value}")
     calls = llm.calls
@@ -118,8 +129,8 @@ def _serve(args: argparse.Namespace) -> None:
         first = seed_demo(store, catalog, calendar, args.start, args.days, args.seed)
         print(f"데모 기록 {args.days}일을 넣었습니다. {first} 마감 재고표부터 시작합니다.")
 
-    def llm_factory() -> ClaudeCodeClient:
-        return ClaudeCodeClient(model=args.model, effort=args.effort, log_path=args.llm_log)
+    def llm_factory() -> LLMClient:
+        return _llm(args)
 
     app = create_app(StoreService(store, catalog, calendar, llm_factory, args.store_name))
     print(f"http://{args.host}:{args.port} 에서 열립니다.")

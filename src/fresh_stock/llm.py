@@ -2,9 +2,9 @@
 
 앱 코드는 LLMClient.generate_json만 쓴다. 백엔드를 바꿔도 나머지 코드는 그대로다.
 
-- ClaudeCodeClient: 임시 백엔드. 로컬 Claude Code CLI(`claude -p`)를 호출해서 API 키 없이
-  Claude Code 로그인으로 동작한다.
-- API 키가 생기면 Anthropic SDK 백엔드를 추가해 갈아 끼운다.
+- ClaudeCodeClient: 로컬 Claude Code CLI(`claude -p`)를 호출해서 API 키 없이 Claude Code 로그인으로
+  동작한다. 개발 중 임시 백엔드이자 기본값이다.
+- AnthropicClient: Anthropic 공식 Python SDK. API 키가 생기면 이쪽으로 바꾼다.
 """
 
 import base64
@@ -152,10 +152,119 @@ class ClaudeCodeClient:
         raise LLMError("CLI 출력에 result가 없습니다.")
 
     def _record(self, call: LLMCall) -> None:
-        # 재고표 평가처럼 여러 스레드에서 동시에 부를 수 있다
-        with _log_lock:
-            self.calls.append(call)
-            if self.log_path:
-                self.log_path.parent.mkdir(parents=True, exist_ok=True)
-                with open(self.log_path, "a", encoding="utf-8") as f:
-                    f.write(json.dumps(call.__dict__, ensure_ascii=False) + "\n")
+        _record(self.calls, self.log_path, call)
+
+
+def _record(calls: list[LLMCall], log_path: Path | None, call: LLMCall) -> None:
+    # 재고표 평가처럼 여러 스레드에서 동시에 부를 수 있다
+    with _log_lock:
+        calls.append(call)
+        if log_path:
+            log_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(log_path, "a", encoding="utf-8") as f:
+                f.write(json.dumps(call.__dict__, ensure_ascii=False) + "\n")
+
+
+# Claude Code 모델 별칭을 API 모델 ID로 바꿀 때 쓴다
+API_MODEL_ALIASES = {"opus": "claude-opus-5", "sonnet": "claude-sonnet-5", "haiku": "claude-haiku-4-5"}
+
+
+@dataclass
+class AnthropicClient:
+    """Anthropic 공식 Python SDK 백엔드. ANTHROPIC_API_KEY나 `ant auth login` 인증으로 동작한다.
+
+    claude-opus-5는 안전 분류기가 요청을 거절하면 서버가 다른 모델로 다시 처리하도록
+    fallbacks="default"를 켠다.
+    """
+
+    model: str = "claude-opus-5"
+    effort: str | None = "low"
+    max_tokens: int = 16000
+    log_path: Path | None = None
+    calls: list[LLMCall] = field(default_factory=list)
+    client: Any = None  # 테스트에서 가짜 클라이언트를 넣을 수 있다
+
+    def generate_json(
+        self,
+        system: str,
+        prompt: str,
+        schema: dict[str, Any],
+        purpose: str = "",
+        images: tuple[ImageInput, ...] = (),
+    ) -> dict[str, Any]:
+        import anthropic
+
+        if self.client is None:
+            self.client = anthropic.Anthropic()
+        content: Any = prompt
+        if images:
+            content = [
+                {
+                    "type": "image",
+                    "source": {
+                        "type": "base64",
+                        "media_type": img.media_type,
+                        "data": base64.standard_b64encode(img.data).decode("utf-8"),
+                    },
+                }
+                for img in images
+            ] + [{"type": "text", "text": prompt}]
+        output_config: dict[str, Any] = {"format": {"type": "json_schema", "schema": schema}}
+        if self.effort:
+            output_config["effort"] = self.effort
+        request = {
+            "model": self.model,
+            "max_tokens": self.max_tokens,
+            "system": system,
+            "messages": [{"role": "user", "content": content}],
+            "output_config": output_config,
+        }
+
+        started = time.monotonic()
+        output, error, usage = None, None, None
+        try:
+            if self.model == "claude-opus-5":
+                response = self.client.beta.messages.create(
+                    **request, betas=["server-side-fallback-2026-07-01"], fallbacks="default"
+                )
+            else:
+                response = self.client.messages.create(**request)
+            usage = response.usage
+            if response.stop_reason == "refusal":
+                error = "모델이 요청을 거절했습니다 (refusal)."
+            elif response.stop_reason == "max_tokens":
+                error = "출력이 max_tokens에서 잘렸습니다."
+            else:
+                text = next(b.text for b in response.content if b.type == "text")
+                output = json.loads(text)
+        except (anthropic.APIStatusError, anthropic.APIConnectionError, json.JSONDecodeError, StopIteration) as e:
+            error = f"{type(e).__name__}: {e}"[:500]
+        _record(
+            self.calls,
+            self.log_path,
+            LLMCall(
+                purpose=purpose,
+                system=system,
+                prompt=prompt,
+                images=len(images),
+                output=output,
+                error=error,
+                input_tokens=(usage.input_tokens + (usage.cache_creation_input_tokens or 0)
+                              + (usage.cache_read_input_tokens or 0)) if usage else 0,
+                output_tokens=usage.output_tokens if usage else 0,
+                seconds=round(time.monotonic() - started, 2),
+            ),
+        )  # fmt: skip
+        if error:
+            raise LLMError(error)
+        return output
+
+
+def make_llm(backend: str, model: str | None, effort: str | None, log_path: Path | None) -> LLMClient:
+    """backend: "claude-code" (로컬 Claude Code CLI, 기본) 또는 "anthropic" (API)."""
+    if backend == "anthropic":
+        api_model = API_MODEL_ALIASES.get(model or "opus", model or "claude-opus-5")
+        return AnthropicClient(model=api_model, effort=effort, log_path=log_path)
+    if backend == "claude-code":
+        return ClaudeCodeClient(model=model or "sonnet", effort=effort, log_path=log_path)
+    raise ValueError(f"알 수 없는 LLM 백엔드: {backend}")
