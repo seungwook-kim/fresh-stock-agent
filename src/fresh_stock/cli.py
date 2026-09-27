@@ -44,6 +44,18 @@ def _memory() -> DayMemoryBank:
     return DayMemoryBank(load_catalog(), MarketCalendar(), _embedder)
 
 
+def load_dotenv(path: Path = Path(".env")) -> None:
+    """프로젝트 폴더의 .env에서 KEY=VALUE를 읽어 환경변수로 둔다. 이미 있는 환경변수가 우선한다."""
+    if not path.exists():
+        return
+    for line in path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        os.environ.setdefault(key.strip(), value.strip().strip('"').strip("'"))
+
+
 def _add_sim_args(p: argparse.ArgumentParser) -> None:
     p.add_argument("--days", type=int, default=90)
     p.add_argument("--start", type=date.fromisoformat, default=date(2026, 7, 1))
@@ -157,7 +169,7 @@ def _serve(args: argparse.Namespace) -> None:
 
     from .demo import seed_demo
     from .service import StoreService
-    from .store import Store
+    from .store import Store, mask_url
     from .web import create_app
 
     if args.port is None:
@@ -170,6 +182,7 @@ def _serve(args: argparse.Namespace) -> None:
         port = args.port
 
     store = Store(args.db)
+    print(f"DB: {mask_url(args.db)}")
     catalog, calendar = load_catalog(), MarketCalendar()
     if args.demo and store.last_closed_day() is None:
         first = seed_demo(store, catalog, calendar, args.start, args.days, args.seed)
@@ -217,6 +230,18 @@ def _eval_retrieval(args: argparse.Namespace) -> None:
         print(f"{name:<32} 1위 적중 {top1:>2}/{n}   3위 안 적중 {hit3:>2}/{n}")
         for miss in misses:
             print(f"    1위 오답: {miss}")
+
+
+def _copy_db(args: argparse.Namespace) -> None:
+    from .store import Store, mask_url
+
+    source, target = Store(args.source), Store(args.target)
+    counts = target.load(source.dump())
+    print(f"{mask_url(args.source)} -> {mask_url(args.target)}")
+    for table, n in counts.items():
+        print(f"  {table:<12} {n:>6}행")
+    source.close()
+    target.close()
 
 
 def _won(v: int) -> str:
@@ -294,6 +319,7 @@ def _write_csv(result: SimulationResult, out: Path) -> None:
 
 
 def main() -> None:
+    load_dotenv()
     parser = argparse.ArgumentParser(prog="fresh-stock")
     sub = parser.add_subparsers(dest="command", required=True)
 
@@ -323,7 +349,11 @@ def main() -> None:
     _add_sim_args(ev)
 
     srv = sub.add_parser("serve", help="모바일 웹 화면을 띄운다")
-    srv.add_argument("--db", type=Path, default=Path("out/store.db"))
+    srv.add_argument(
+        "--db",
+        default=os.environ.get("FRESH_STOCK_DB", "out/store.db"),
+        help="SQLite 파일 경로 또는 postgresql:// 주소 (환경변수 FRESH_STOCK_DB, .env로도 정한다)",
+    )
     srv.add_argument("--demo", action="store_true", help="빈 DB면 시뮬레이션 기록을 넣고 시작한다")
     srv.add_argument("--store-name", default="우리가게")
     srv.add_argument("--host", default="127.0.0.1")
@@ -335,8 +365,14 @@ def main() -> None:
     ret = sub.add_parser("eval-retrieval", help="가게 메모 검색 방식(BM25, 임베딩, 하이브리드)을 비교한다")
     ret.add_argument("--bm25-only", action="store_true", help="임베딩 모델 없이 BM25만 잰다")
 
+    cp = sub.add_parser("copy-db", help="저장소 데이터를 다른 DB로 옮긴다 (예: SQLite -> Supabase)")
+    cp.add_argument("source", help="옮길 DB (SQLite 파일 경로 또는 postgresql:// 주소)")
+    cp.add_argument("target", help="받을 빈 DB")
+
     args = parser.parse_args()
-    if args.command == "eval-retrieval":
+    if args.command == "copy-db":
+        _copy_db(args)
+    elif args.command == "eval-retrieval":
         _eval_retrieval(args)
     elif args.command == "serve":
         _serve(args)

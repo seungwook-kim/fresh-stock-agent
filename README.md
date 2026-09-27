@@ -60,7 +60,7 @@ flowchart LR
 ```bash
 uv sync
 uv run fresh-stock serve --demo        # 모바일 웹 (가상 매장 기록 60일을 넣고 시작). 8799번부터 빈 포트를 찾아 주소를 알려준다
-uv run pytest                          # 테스트 97개
+uv run pytest                          # 테스트 (PostgreSQL 전용 6개는 FRESH_STOCK_TEST_PG가 있을 때만)
 ```
 
 화면의 "합성 재고표로 해보기"를 누르면 오늘 예상 재고로 손글씨 재고표를 만들어 Claude가 읽는다. 홈에서 가게 메모를 추가하면 발주 에이전트가 반영하고, 발주 화면에 참고한 과거 기록이 나온다. 과거 기록 검색용 임베딩 모델(약 0.5GB)은 처음 쓸 때 `.cache/models`에 받는다. 받지 않으려면 `--no-rag`.
@@ -78,6 +78,18 @@ uv run fresh-stock eval-sheets --n 10 --days 60 --seed 11 --store-abbr --with-al
 uv run fresh-stock messages --date 2026-09-21 --start 2026-08-20 --llm      # 거래처별 발주 문자
 uv run fresh-stock simulate --policy seasonal --out out/                    # 가상 매장 기록을 CSV로
 ```
+
+### 저장소 (SQLite / Supabase)
+
+기본은 SQLite 파일(`out/store.db`)이다. PostgreSQL(Supabase 등) 주소를 주면 같은 코드로 PostgreSQL을 쓴다. SQL은 두 DB에서 모두 도는 문법만 쓰고, 원격 DB에서는 연결 풀로 끊긴 연결을 다시 잇는다.
+
+```bash
+cp .env.example .env                  # .env에 FRESH_STOCK_DB=postgresql://... (Supabase 연결 문자열)
+uv run fresh-stock copy-db out/store.db "postgresql://..."   # 지금까지 SQLite에 쌓인 데이터를 빈 DB로 옮김
+uv run fresh-stock serve               # .env의 FRESH_STOCK_DB로 뜬다 (화면 출력에서 비밀번호는 가림)
+```
+
+PostgreSQL에서도 저장소 테스트를 돌릴 수 있다: `FRESH_STOCK_TEST_PG=postgresql://... uv run pytest`. 로컬 PostgreSQL 16으로 전체 테스트 110개와 웹 하루 흐름(재고표 읽기 → 확정 → 과거 기록 검색이 들어간 발주 → 승인 → 문자)을 확인했다.
 
 ### LLM 백엔드
 
@@ -98,7 +110,7 @@ uv run fresh-stock simulate --policy seasonal --out out/                    # �
 | `ordering.py` | 규칙 기반 발주(기존 방식, 요일·장날 보정), 입력 실수 가드레일 |
 | `accounting.py` | 재고로 판매량 역산, 떨이 양 추정 |
 | `messages.py` | 거래처별 문자(한 줄), 전화 메모, 가락시장 구매 목록 |
-| `service.py`, `store.py`, `web.py` | 하루 업무 흐름, SQLite 저장, 모바일 웹 (FastAPI + Jinja) |
+| `service.py`, `store.py`, `web.py` | 하루 업무 흐름, SQLite·PostgreSQL 저장, 모바일 웹 (FastAPI + Jinja) |
 | `simulator.py`, `events.py` | 가상 매장: 요일·장날·신선도·떨이·품절, 비 예보·추석·TV 방송 |
 | `sheets.py`, `sheet_eval.py` | 합성 손글씨 재고표 생성과 인식 평가 |
 | `llm.py` | Claude Code CLI / Anthropic SDK 백엔드, 호출 기록 |
@@ -211,8 +223,8 @@ uv run fresh-stock simulate --policy seasonal --out out/                    # �
 - **가상 매장은 가정값이다.** 품목·가격·판매량·비 오는 날 감소 폭(0.6배)·추석 다음날(0.5배)·TV 효과(다음 날 3배)는 추정이다.
 - **계절 변화를 모델링하지 않았다.** 계절에 따라 잘 나가는 야채가 달라지지만 시뮬레이터 품목 수요는 기간 내내 같다.
 - **과거 기록 검색은 작은 기록으로만 검증했다.** 비교한 명절은 작년 추석 한 번이고, 기록은 메모가 있던 날 약 60일이다. 기록이 수백 곳·수년으로 커지면 검색 평가 셋도 실제 메모로 늘려야 한다.
-- 다음 단계: 실제 재고표 사진 평가, 실제 가게 메모로 검색 평가 셋 확장, LLM 트레이싱(Langfuse), 배포와 PostgreSQL 전환.
+- 다음 단계: 실제 재고표 사진 평가, 실제 가게 메모로 검색 평가 셋 확장, Supabase 연결, LLM 트레이싱(Langfuse), 배포.
 
 ## 기술
 
-Python 3.12, uv, FastAPI, Jinja2, SQLite, Pillow, fastembed(로컬 다국어 임베딩), NumPy, Anthropic Python SDK, Claude Code CLI, pytest (97개).
+Python 3.12, uv, FastAPI, Jinja2, SQLite, PostgreSQL(psycopg 3), Pillow, fastembed(로컬 다국어 임베딩), NumPy, Anthropic Python SDK, Claude Code CLI, pytest (110개).
