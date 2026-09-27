@@ -3,6 +3,7 @@
     fresh-stock simulate --policy seasonal --days 90 --out out/
     fresh-stock compare --days 90
     fresh-stock compare --days 30 --policies seasonal,agent
+    fresh-stock messages --date 2026-09-21 --llm
 """
 
 import argparse
@@ -14,6 +15,7 @@ from .agent import AgentPolicy
 from .catalog import load_catalog
 from .llm import ClaudeCodeClient
 from .market_calendar import MarketCalendar
+from .messages import LLMGreetingWriter, build_messages
 from .ordering import POLICIES, OrderPolicy
 from .simulator import SimulationResult, Summary, run_simulation
 
@@ -50,6 +52,30 @@ def _run(args: argparse.Namespace, policy_name: str) -> SimulationResult:
         guardrail=not args.no_guardrail,
         with_events=not args.no_events,
     )
+
+
+def _print_messages(args: argparse.Namespace) -> None:
+    args.days = (args.date - args.start).days + 2
+    if args.days < 2:
+        raise SystemExit("--date는 --start 이후여야 합니다.")
+    result = _run(args, args.policy)
+    todays = [o for o in result.orders if o.day == args.date]
+    if not todays:
+        print(f"{args.date}에는 발주가 없습니다 (다음 날 입고가 없는 날).")
+        return
+    arrival = todays[0].arrival
+    notes = [n for d in MarketCalendar().cover_days(arrival) for n in result.notes.get(d, [])]
+    writer = None
+    if args.llm:
+        llm = ClaudeCodeClient(model=args.model, effort=args.effort, log_path=args.llm_log)
+        writer = LLMGreetingWriter(llm, args.store_name)
+    messages = build_messages(
+        result.catalog, arrival, {o.item_id: o.final for o in todays}, args.store_name, notes, writer
+    )
+    for m in messages:
+        print(f"===== {m.supplier.name} ({m.supplier.channel}) · 인사말: {m.greeting_source} =====")
+        print(m.text)
+        print()
 
 
 def _won(v: int) -> str:
@@ -137,8 +163,17 @@ def main() -> None:
     cmp_.add_argument("--policies", default=",".join(POLICIES), help=f"쉼표로 구분 ({', '.join(POLICY_NAMES)})")
     _add_sim_args(cmp_)
 
+    msg = sub.add_parser("messages", help="시뮬레이션의 특정 발주일 주문으로 거래처별 발주 문자를 만든다")
+    msg.add_argument("--date", type=date.fromisoformat, required=True, help="발주일 (YYYY-MM-DD)")
+    msg.add_argument("--policy", choices=POLICY_NAMES, default="seasonal")
+    msg.add_argument("--store-name", default="우리가게")
+    msg.add_argument("--llm", action="store_true", help="인사말과 끝맺음을 Claude로 쓴다")
+    _add_sim_args(msg)
+
     args = parser.parse_args()
-    if args.command == "simulate":
+    if args.command == "messages":
+        _print_messages(args)
+    elif args.command == "simulate":
         result = _run(args, args.policy)
         _write_csv(result, args.out)
         _print_summaries([result.summary()])

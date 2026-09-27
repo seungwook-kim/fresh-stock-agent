@@ -81,6 +81,7 @@ class SimulationResult:
     ledger: list[DayRecord] = field(default_factory=list)
     truths: list[DayTruth] = field(default_factory=list)
     orders: list[OrderLine] = field(default_factory=list)
+    notes: dict[date, list[str]] = field(default_factory=dict)  # 날짜별 가게 메모
     ending_stock: dict[str, float] = field(default_factory=dict)
 
     def summary(self) -> Summary:
@@ -222,4 +223,5 @@ def run_simulation(
             result.orders.append(OrderLine(d, arrival, item.id, qty, entered, final, typo, warning))
 
     result.ending_stock = {i: sum(b.qty for b in bs) for i, bs in batches.items()}
+    result.notes = dict(notes)
     return result
