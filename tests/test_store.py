@@ -183,9 +183,11 @@ def test_load_dotenv(tmp_path, monkeypatch):
     from fresh_stock.cli import load_dotenv
 
     env = tmp_path / ".env"
-    env.write_text('# 주석\nFRESH_STOCK_DB="postgresql://u:p@h/db"\nFRESH_STOCK_LLM=anthropic\n', encoding="utf-8")
+    env.write_text('# 주석\nFRESH_STOCK_DB="postgresql://u:p@h/db"\nFRESH_STOCK_LLM=anthropic\nFRESH_STOCK_LAT=\n', encoding="utf-8")
     monkeypatch.delenv("FRESH_STOCK_DB", raising=False)
+    monkeypatch.delenv("FRESH_STOCK_LAT", raising=False)
     monkeypatch.setenv("FRESH_STOCK_LLM", "claude-code")  # 이미 있는 환경변수가 우선
     load_dotenv(env)
     assert os.environ["FRESH_STOCK_DB"] == "postgresql://u:p@h/db"
     assert os.environ["FRESH_STOCK_LLM"] == "claude-code"
+    assert "FRESH_STOCK_LAT" not in os.environ  # 빈 값은 설정하지 않은 것

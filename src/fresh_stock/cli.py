@@ -43,7 +43,9 @@ def load_dotenv(path: Path = Path(".env")) -> None:
         if not line or line.startswith("#") or "=" not in line:
             continue
         key, value = line.split("=", 1)
-        os.environ.setdefault(key.strip(), value.strip().strip('"').strip("'"))
+        value = value.strip().strip('"').strip("'")
+        if value:  # 값을 비워 둔 줄은 설정하지 않은 것으로 본다
+            os.environ.setdefault(key.strip(), value)
 
 
 def _add_sim_args(p: argparse.ArgumentParser) -> None:
