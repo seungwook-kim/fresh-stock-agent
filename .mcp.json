@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "fresh-stock": {
+      "command": "uv",
+      "args": ["run", "fresh-stock", "mcp"]
+    }
+  }
+}

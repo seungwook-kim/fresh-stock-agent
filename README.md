@@ -13,6 +13,7 @@
 | 입력 실수 가드레일 (가상 매장 90일) | 발주 입력 실수 19건 중 19건 차단, 오경보 0건 |
 | 화면 | 모바일 웹: 구글 로그인, 가게별 구분, 재고표 사진 → 확인 → 발주 승인 → 거래처 문자 복사, AI 호출 기록 |
 | 가게 메모 | 날씨·명절은 자동, 사장님이 적은 메모(TV 방송 등)는 발주 추천 때 AI가 웹 검색으로 확인해 반영 |
+| MCP 서버 + 스킬 | Claude Code·Claude Desktop에서 말로 하루 업무 처리 (재고표 → 발주 추천 → 승인 전 확인 → 거래처 문자) |
 
 모든 수치는 가상 매장과 합성 재고표 기준이며 실제 매장 성과가 아니다. 가정과 한계는 아래에 적었다.
 
@@ -115,6 +116,7 @@ PostgreSQL에서도 저장소 테스트를 돌릴 수 있다: `FRESH_STOCK_TEST_
 | `service.py`, `store.py`, `web.py` | 하루 업무 흐름, SQLite·PostgreSQL 저장(가게별), 구글 로그인과 모바일 웹 (FastAPI + Jinja) |
 | `simulator.py`, `events.py` | 가상 매장: 요일·장날·신선도·떨이·품절, 비 예보·추석·TV 방송 |
 | `sheets.py`, `sheet_eval.py` | 합성 손글씨 재고표 생성과 인식 평가 |
+| `mcp_server.py`, `runtime.py` | MCP 서버(도구, 가게 권한, 승인 안전장치), 웹·MCP 공통 서비스 구성 |
 | `llm.py` | Claude Code CLI / Anthropic SDK 백엔드, 호출 기록 |
 | `data/` | 품목 62종·거래처 6곳 (가정값), 사장님 경험 노트 |
 
@@ -140,6 +142,24 @@ PostgreSQL에서도 저장소 테스트를 돌릴 수 있다: `FRESH_STOCK_TEST_
 - **개발용 로그인**: PC에서 확인할 때 `--dev-login` (또는 `FRESH_STOCK_DEV_LOGIN=1`)을 주면 이메일만 넣어 로그인할 수 있다. 운영에서는 끈다
 
 구글 로그인 설정: Google Cloud Console → API 및 서비스 → 사용자 인증 정보 → OAuth 클라이언트 ID(웹 애플리케이션)를 만들고, 승인된 리디렉션 URI에 `http://127.0.0.1:8799/auth/google`(배포하면 `https://도메인/auth/google`)을 넣은 뒤 `.env`에 `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `FRESH_STOCK_SECRET`을 넣는다.
+
+## MCP 서버와 스킬
+
+웹 화면 없이도 Claude Code나 Claude Desktop에서 말로 가게 업무를 볼 수 있다.
+
+- **MCP 서버** (`fresh-stock mcp`, `src/fresh_stock/mcp_server.py`): 오늘 할 일, 메모 추가·조회·AI 확인, 재고표 사진 읽기·확정, 발주 추천, 발주 승인, 거래처 문자, 매출, 품목 목록을 도구로 공개한다. `FRESH_STOCK_EMAIL`이 멤버인 가게만 다룬다 (웹과 같은 규칙)
+- **승인 안전장치**: `approve_order`는 사용자 승인 표시(`user_confirmed`)가 없으면 거절하고, 입력 실수 가드레일이 경고하면 승인하지 않고 경고를 돌려준다. 수량은 모두 코드가 계산한다
+- **스킬** (`.claude/skills/fresh-stock-store/SKILL.md`): 하루 업무 순서, 확인 표시된 줄만 사람에게 묻기, 발주 수량을 지어내지 않기, 승인 전에 보여주고 묻기, 확인 못 한 메모를 부풀리지 않기를 이유와 함께 적었다
+
+연결: 이 폴더를 Claude Code로 열면 `.mcp.json`의 fresh-stock 서버와 스킬이 잡힌다. `.env`에 `FRESH_STOCK_EMAIL`(가게 멤버 이메일)과 `FRESH_STOCK_DB`를 넣는다. Claude Desktop은 설정의 MCP 서버에 `uv --directory <이 폴더> run fresh-stock mcp`를 추가한다.
+
+실제 Claude Code(Sonnet)에 붙여 확인한 것:
+
+| 요청 | 결과 |
+|---|---|
+| "오늘 할 일 알려줘. 손님이 어제 TV에 브로콜리가 암 예방에 좋다고 나왔대, 메모해 둬" | 할 일 확인 후 영향받을 날(다음 날)로 메모하고 "지금 AI로 확인할까요?" (31초) |
+| "마감했어. 재고표 사진은 …jpg, 현금 50만 카드 90만, 발주 추천까지 보여줘" | 사진 읽기 → 확인 표시 3줄 반영 → 확정 → 메모 AI 확인(둘 다 "방송 확인 못 함"으로 전달) → 추천을 보여주고 **"이대로 승인할까?"에서 멈춤** (2분, DB에서 미승인 확인) |
+| "승인할게. 근데 토마토만 88박스로 바꿔서" | 승인 도구를 부르기 전에 "추천 0박스·재고 5박스인데 88이 맞아, 8을 잘못 말한 거야?"라고 되물음 (미승인 유지) |
 
 ## 결과
 
@@ -252,4 +272,4 @@ PostgreSQL에서도 저장소 테스트를 돌릴 수 있다: `FRESH_STOCK_TEST_
 
 ## 기술
 
-Python 3.12, uv, FastAPI, Jinja2, SQLite, PostgreSQL(psycopg 3), Pillow, fastembed(로컬 다국어 임베딩), NumPy, Anthropic Python SDK, Claude Code CLI, authlib(구글 로그인), pytest (144개).
+Python 3.12, uv, FastAPI, Jinja2, SQLite, PostgreSQL(psycopg 3), Pillow, fastembed(로컬 다국어 임베딩), NumPy, Anthropic Python SDK, Claude Code CLI, authlib(구글 로그인), MCP Python SDK, pytest (149개).

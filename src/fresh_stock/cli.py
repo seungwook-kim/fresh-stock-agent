@@ -20,7 +20,8 @@ from .catalog import load_catalog
 from .llm import LLMClient, make_llm
 from .market_calendar import MarketCalendar
 from .messages import LLMGreetingWriter, build_messages
-from .memory import DayMemoryBank, FastEmbedEmbedder, evaluate_retrieval
+from .memory import FastEmbedEmbedder, evaluate_retrieval
+from .runtime import memory_bank, service_factory, weather_source
 from .ordering import POLICIES, OrderPolicy, OwnerPolicy, SwitchPolicy
 from .sheet_eval import build_cases, run_eval, summarize
 from .sheets import synthetic_aliases
@@ -33,17 +34,6 @@ AGENT_VARIANTS = {
     "agent-rag-only": (True, False),
 }
 POLICY_NAMES = [*POLICIES, OwnerPolicy.name, *AGENT_VARIANTS]
-_embedder = None
-
-
-def _memory() -> DayMemoryBank:
-    """과거 기록 검색. 임베딩 모델은 한 번만 불러 여러 발주 방식이 같이 쓴다."""
-    global _embedder
-    if _embedder is None:
-        _embedder = FastEmbedEmbedder()
-    return DayMemoryBank(load_catalog(), MarketCalendar(), _embedder)
-
-
 def load_dotenv(path: Path = Path(".env")) -> None:
     """프로젝트 폴더의 .env에서 KEY=VALUE를 읽어 환경변수로 둔다. 이미 있는 환경변수가 우선한다."""
     if not path.exists():
@@ -87,7 +77,7 @@ def _llm(args: argparse.Namespace) -> LLMClient:
 def _make_policy(name: str, args: argparse.Namespace) -> OrderPolicy:
     if name in AGENT_VARIANTS:
         use_memory, use_knowledge = AGENT_VARIANTS[name]
-        policy: OrderPolicy = AgentPolicy(_llm(args), memory=_memory() if use_memory else None, use_knowledge=use_knowledge)
+        policy: OrderPolicy = AgentPolicy(_llm(args), memory=memory_bank() if use_memory else None, use_knowledge=use_knowledge)
     elif name == OwnerPolicy.name:
         policy = OwnerPolicy()
     else:
@@ -170,7 +160,6 @@ def _serve(args: argparse.Namespace) -> None:
     import uvicorn
 
     from .demo import seed_demo
-    from .service import StoreService
     from .store import Database, Store, mask_url
     from .web import AuthConfig, create_app
 
@@ -196,30 +185,16 @@ def _serve(args: argparse.Namespace) -> None:
             first = seed_demo(Store(db, demo_store_id), catalog, calendar, args.start, args.days, args.seed)
             print(f"데모 가게에 기록 {args.days}일을 넣었습니다. {first} 마감 재고표부터 시작합니다.")
 
-    weather = _weather()
     log_dir = args.llm_log
-
-    def make_service(store_id: int) -> StoreService:
-        log = log_dir / f"store-{store_id}.jsonl"
-
-        def llm_factory() -> LLMClient:
-            return make_llm(args.backend, args.model, args.effort, log)
-
-        def research_llm_factory() -> LLMClient:
-            # 웹 검색은 low에서 일찍 포기하는 경우가 있어 medium으로 둔다
-            return make_llm(args.backend, args.model, "medium", log, web_search=True)
-
-        return StoreService(
-            Store(db, store_id),
-            catalog,
-            calendar,
-            llm_factory,
-            db.store_name(store_id) or "우리가게",
-            None if args.no_rag else _memory(),
-            auto_notes=not args.no_auto_notes,
-            weather=weather,
-            research_llm_factory=research_llm_factory if args.backend == "claude-code" else None,
-        )
+    make_service = service_factory(
+        db,
+        backend=args.backend,
+        model=args.model,
+        effort=args.effort,
+        log_dir=log_dir,
+        rag=not args.no_rag,
+        auto_notes=not args.no_auto_notes,
+    )
 
     secret = os.environ.get("FRESH_STOCK_SECRET")
     if not secret:
@@ -243,21 +218,12 @@ def _serve(args: argparse.Namespace) -> None:
 DEFAULT_PORT = 8799
 
 
-def _weather():
-    """가게 위치(FRESH_STOCK_LAT, FRESH_STOCK_LON, 기본 서울)의 날씨 예보."""
-    from .auto_notes import SEOUL, WeatherSource
-
-    lat = float(os.environ.get("FRESH_STOCK_LAT", SEOUL[0]))
-    lon = float(os.environ.get("FRESH_STOCK_LON", SEOUL[1]))
-    return WeatherSource(lat, lon)
-
-
 def _fetch_notes(args: argparse.Namespace) -> None:
     from .service import StoreService
     from .store import Database, Store
 
     db = Database(args.db)
-    weather = _weather()
+    weather = weather_source()
     day = args.day or date.today()
     for store_id in db.store_ids():
         service = StoreService(Store(db, store_id), load_catalog(), MarketCalendar(), weather=weather)
@@ -267,6 +233,27 @@ def _fetch_notes(args: argparse.Namespace) -> None:
             print(f"  {n.day} [{n.source}] {n.text}")
         if error:
             print(f"  {error}")
+
+
+def _mcp(args: argparse.Namespace) -> None:
+    from .mcp_server import build_server
+    from .store import Database
+
+    email = args.email or os.environ.get("FRESH_STOCK_EMAIL")
+    if not email:
+        raise SystemExit("FRESH_STOCK_EMAIL(또는 --email)에 가게 멤버인 구글 계정 이메일을 넣어 주세요.")
+    db = Database(args.db)
+    make_service = service_factory(
+        db,
+        backend=args.backend,
+        model=args.model,
+        effort=args.effort,
+        log_dir=args.llm_log,
+        rag=not args.no_rag,
+        auto_notes=not args.no_auto_notes,
+    )
+    # stdio 방식이라 표준 출력에는 아무것도 찍지 않는다 (MCP 메시지와 섞이면 연결이 깨진다)
+    build_server(db, make_service, email).run("stdio")
 
 
 def _port_in_use(host: str, port: int) -> bool:
@@ -435,6 +422,16 @@ def main() -> None:
     ret = sub.add_parser("eval-retrieval", help="가게 메모 검색 방식(BM25, 임베딩, 하이브리드)을 비교한다")
     ret.add_argument("--bm25-only", action="store_true", help="임베딩 모델 없이 BM25만 잰다")
 
+    mc = sub.add_parser("mcp", help="MCP 서버(stdio)를 띄운다. Claude Code·Claude Desktop에서 가게 업무를 도구로 쓴다")
+    mc.add_argument("--db", default=os.environ.get("FRESH_STOCK_DB", "out/store.db"))
+    mc.add_argument("--email", default=None, help="가게 멤버인 구글 계정 이메일 (기본: FRESH_STOCK_EMAIL)")
+    mc.add_argument("--backend", choices=["claude-code", "anthropic"], default=os.environ.get("FRESH_STOCK_LLM", "claude-code"))
+    mc.add_argument("--model", default=None)
+    mc.add_argument("--effort", default="low")
+    mc.add_argument("--llm-log", type=Path, default=Path("out/llm"))
+    mc.add_argument("--no-rag", action="store_true")
+    mc.add_argument("--no-auto-notes", action="store_true")
+
     fn = sub.add_parser("fetch-notes", help="날씨·명절 메모를 가져와 넣는다 (매일 예약 실행용)")
     fn.add_argument("--db", default=os.environ.get("FRESH_STOCK_DB", "out/store.db"))
     fn.add_argument("--day", type=date.fromisoformat, default=None, help="기준일 (기본: 오늘)")
@@ -445,7 +442,9 @@ def main() -> None:
     cp.add_argument("target", help="받을 빈 DB")
 
     args = parser.parse_args()
-    if args.command == "fetch-notes":
+    if args.command == "mcp":
+        _mcp(args)
+    elif args.command == "fetch-notes":
         _fetch_notes(args)
     elif args.command == "copy-db":
         _copy_db(args)
