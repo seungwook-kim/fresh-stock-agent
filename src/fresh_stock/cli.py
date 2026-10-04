@@ -12,13 +12,13 @@ import argparse
 import csv
 import os
 import socket
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 
 from .agent import AgentPolicy
 from .catalog import load_catalog
 from .llm import LLMClient, make_llm
-from .market_calendar import MarketCalendar
+from .market_calendar import MarketCalendar, today_kst
 from .messages import LLMGreetingWriter, build_messages
 from .memory import FastEmbedEmbedder, evaluate_retrieval
 from .runtime import memory_bank, service_factory, weather_source
@@ -184,7 +184,9 @@ def _serve(args: argparse.Namespace) -> None:
             demo_store_id = ids[0]
         else:
             demo_store_id = db.create_store("데모 가게", os.environ.get("FRESH_STOCK_DEMO_OWNER", "demo@local"))
-            first = seed_demo(Store(db, demo_store_id), catalog, calendar, args.start, args.days, args.seed)
+            # 기록이 오늘 전날에 끝나도록 넣어 오늘 마감 재고표부터 시작한다
+            start = args.start or today_kst() - timedelta(days=args.days)
+            first = seed_demo(Store(db, demo_store_id), catalog, calendar, start, args.days, args.seed)
             print(f"데모 가게에 기록 {args.days}일을 넣었습니다. {first} 마감 재고표부터 시작합니다.")
 
     log_dir = args.llm_log
@@ -226,7 +228,7 @@ def _fetch_notes(args: argparse.Namespace) -> None:
 
     db = Database(args.db)
     weather = weather_source()
-    day = args.day or date.today()
+    day = args.day or today_kst()
     for store_id in db.store_ids():
         service = StoreService(Store(db, store_id), load_catalog(), MarketCalendar(), weather=weather)
         added, error = service.refresh_auto_notes(day, args.days)
@@ -419,7 +421,7 @@ def main() -> None:
     srv.add_argument("--no-rag", action="store_true", help="과거 비슷한 날 검색을 끈다 (임베딩 모델을 받지 않는다)")
     srv.add_argument("--no-auto-notes", action="store_true", help="발주 추천 때 날씨·명절 메모를 자동으로 가져오지 않는다")
     _add_sim_args(srv)
-    srv.set_defaults(days=60, llm_log=Path("out/llm"))  # AI 호출 기록은 가게별 파일로 남긴다
+    srv.set_defaults(days=60, start=None, llm_log=Path("out/llm"))  # AI 호출 기록은 가게별 파일로 남긴다
 
     ret = sub.add_parser("eval-retrieval", help="가게 메모 검색 방식(BM25, 임베딩, 하이브리드)을 비교한다")
     ret.add_argument("--bm25-only", action="store_true", help="임베딩 모델 없이 BM25만 잰다")

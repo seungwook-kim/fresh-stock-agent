@@ -1,3 +1,4 @@
+import math
 from datetime import date, timedelta
 
 import pytest
@@ -171,3 +172,42 @@ def test_demo_notes_have_sources(demo):
     sources = {n.text: n.source for n in store.note_records()}
     assert sources["비 예보 (강수확률 80%)"] == "날씨"
     assert any(src == "사장님" and "효능" in text for text, src in sources.items())
+
+
+def test_new_store_first_order_is_not_zero():
+    """처음 쓰는 가게: 첫 재고표는 전날 재고를 몰라 판매량을 알 수 없다. 그날을 판매 0으로 보면 발주가 전부 0이 된다."""
+    service = StoreService(Store(":memory:"), catalog, calendar)
+    day = date(2026, 10, 5)  # 월요일, 다음 날 입고
+    service.store.save_day(day, {i.id: 3.0 for i in catalog.items}, 500000, 900000)
+    plan = service.make_plan(day)
+    # 판매 기록이 없으니 품목 기본 수요(하루 평균)로 시작한다. 10/6(화)는 장날이 아니고 하루만 버티면 된다
+    expected = {i.id: max(0, math.ceil(i.base_demand * 1.2 - 3 - 1e-9)) for i in catalog.items}
+    assert {ln.item_id: ln.recommended for ln in plan.lines} == expected and sum(expected.values()) > 0
+
+
+def test_skip_closed_day_keeps_dates_and_demand(demo, monkeypatch):
+    store, first = demo
+    service = StoreService(store, catalog, calendar)
+    monkeypatch.setattr("fresh_stock.service.today_kst", lambda: first + timedelta(days=3))
+    assert service.status() == (SHEET, first) and service.days_behind() == 3
+    stock = store.closing(first - timedelta(days=1))
+    arrived = store.received(first)
+
+    assert service.skip() == (SHEET, first)  # 쉬는 날: 판매 없이 재고가 그대로 넘어간다
+    closing = store.closing(first)
+    assert all(closing[i.id] == stock.get(i.id, 0) + arrived.get(i.id, 0) for i in catalog.items)
+    assert store.ledger()[-1].revenue == 0
+
+    step, day = service.status()
+    if step == ORDER:  # 발주도 건너뛰면 입고 0
+        assert service.skip() == (ORDER, first)
+        assert store.plan(first).approved and store.received(first + timedelta(days=1)) == {}
+
+    # 쉰 날은 수요 기록에서 빠진다 (요일 중앙값을 0으로 끌어내리지 않게)
+    ctx = service.order_context(store.last_closed_day())
+    if ctx is not None:
+        assert first not in {d for d, _ in ctx.demand_history("tomato")}
+
+    monkeypatch.setattr("fresh_stock.service.today_kst", lambda: first - timedelta(days=1))
+    with pytest.raises(ValueError, match="아직 오지 않은 날"):
+        service.skip()

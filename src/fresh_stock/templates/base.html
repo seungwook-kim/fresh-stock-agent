@@ -73,6 +73,20 @@
 </nav>
 {% endif %}
 <main>
+{% if status_day and today and status_day < today %}
+  <div class="alert">
+    {% if step == "sheet" %}
+      지금 할 일이 <b>{{ status_day | day }} 마감 재고표</b>예요 (오늘은 {{ today | day }}).
+      그날 가게를 쉬었다면 건너뛰어 주세요. 그대로 올리면 오늘 재고표가 {{ status_day | day }} 기록으로 저장돼요.
+    {% else %}
+      <b>{{ status_day | day }} 발주</b>를 승인하지 않은 채 날짜가 지났어요 (오늘은 {{ today | day }}).
+      실제로 주문했다면 발주 화면에서 그 수량으로 승인하고, 주문하지 않았다면 건너뛰어 주세요.
+    {% endif %}
+    <form method="post" action="/skip" style="margin-top:8px">
+      <button class="btn small secondary">{{ status_day | day }} {{ "쉬는 날로" if step == "sheet" else "발주 없이" }} 건너뛰기</button>
+    </form>
+  </div>
+{% endif %}
 {% block content %}{% endblock %}
 </main>
 <div id="loading"><div id="loading-text">처리하는 중...</div></div>

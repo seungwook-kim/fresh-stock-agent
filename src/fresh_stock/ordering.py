@@ -37,10 +37,15 @@ class OrderContext:
         return regular_sales_series(self.ledger, self.catalog)
 
     def demand_history(self, item_id: str) -> list[tuple[date, float]]:
-        """날짜별 정가 수요 추정치. 떨이는 빼고, 다 팔린 날은 실제 수요가 더 컸을 것이므로 올려 잡는다."""
+        """날짜별 정가 수요 추정치. 떨이는 빼고, 다 팔린 날은 실제 수요가 더 컸을 것이므로 올려 잡는다.
+
+        아무것도 팔리지 않은 날은 뺀다. 가게를 쉰 날이거나, 전날 재고를 모르는 첫 기록(처음 쓰기 시작한 날)이라
+        수요가 0이었던 게 아니다. 넣으면 요일 중앙값이 0으로 끌려 내려가 발주가 0이 된다.
+        """
         return [
             (rec.day, sold.get(item_id, 0.0) * (SOLD_OUT_BUMP if rec.closing.get(item_id, 0.0) == 0 else 1.0))
             for rec, sold in zip(self.ledger, self._sales)
+            if any(q > 0 for q in sold.values())
         ]
 
 

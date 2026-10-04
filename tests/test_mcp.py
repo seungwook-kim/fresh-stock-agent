@@ -76,11 +76,19 @@ def test_full_day_through_mcp(tmp_path):
     sheet = call(server, "read_sheet", image_path=str(photo))
     assert sheet["needs_check_count"] == 1 and sheet["rows"][0]["written"] == "토마 4반"
 
+    assert [r["line"] for r in sheet["rows"]] == [0, 1]
     with pytest.raises(ToolError, match="아무것도 저장하지 않았습니다"):
-        call(server, "confirm_sheet", rows=[{"item": "두리안", "qty": "1"}])
-    done = call(server, "confirm_sheet", rows=[{"item": "토마토", "qty": "4반"}, {"item": "방토", "qty": "2"}], cash=100000)
+        call(server, "confirm_sheet", cash=0, card=0, corrections=[{"item": "두리안", "qty": "1"}])
+    # 확인 표시된 줄(사과 x)을 사람에게 확인받지 않으면 저장하지 않는다
+    with pytest.raises(ToolError, match="1번 '사과 x'"):
+        call(server, "confirm_sheet", cash=100000, card=0)
+    # 고친 줄만 넘겨도 나머지 읽은 줄(토마토 4반)은 그대로 저장된다
+    done = call(
+        server, "confirm_sheet", cash=100000, card=0, corrections=[{"line": 1, "qty": "0"}, {"item": "방토", "qty": "2"}]
+    )
     assert done["next_action"].startswith("get_order_plan")
-    assert Store(db, store_id).closing(day)["cherry_tomato"] == 2.0
+    closing = Store(db, store_id).closing(day)
+    assert closing["tomato"] == 4.5 and closing["cherry_tomato"] == 2.0 and closing["apple"] == 0
 
     plan = call(server, "get_order_plan")
     assert plan["arrival"] == (day + timedelta(days=1)).isoformat() and plan["agent_summary"] == "평소대로"
@@ -113,6 +121,17 @@ def test_member_with_two_stores_must_choose():
     with pytest.raises(ToolError, match="2호점"):
         call(server, "today")
     assert call(server, "today", store_id=second)["store"] == "2호점"
+
+
+def test_days_behind_and_skip_day():
+    server, db, store_id, day, _ = _setup()
+    t = call(server, "today")
+    assert t["days_behind"] > 0 and "skip_day" in t["warning"]  # 데모 기록은 7월에 끝난다
+    with pytest.raises(ToolError, match="확인한 뒤"):
+        call(server, "skip_day", user_confirmed=False)
+    skipped = call(server, "skip_day", user_confirmed=True)
+    assert skipped["skipped"].startswith(day.isoformat()) and skipped["now"]["step"] == "발주"
+    assert call(server, "skip_day", user_confirmed=True)["now"] == {"step": "재고표", "day": (day + timedelta(days=1)).isoformat()}
 
 
 def test_step_guards():

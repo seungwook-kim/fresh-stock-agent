@@ -21,11 +21,12 @@ from collections import defaultdict
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import date
 from pathlib import Path
 from typing import Any
 
 from .accounting import DayRecord
+from .market_calendar import now_kst
 
 SCHEMA_VERSION = "2"
 SCHEMA = """
@@ -199,7 +200,7 @@ def mask_url(url: str) -> str:
 
 
 def _now() -> str:
-    return datetime.now().isoformat(timespec="seconds")
+    return now_kst().isoformat(timespec="seconds")
 
 
 class _Tx:
@@ -473,8 +474,12 @@ class Store:
 
     def delete_note(self, note_id: int) -> None:
         with self._tx() as tx:
+            # note_research에는 가게 구분이 없으므로, 이 가게의 메모일 때만 조사 결과를 지운다
+            tx.execute(
+                "DELETE FROM note_research WHERE note_id IN (SELECT id FROM note WHERE id = ? AND store_id = ?)",
+                (note_id, self.store_id),
+            )
             tx.execute("DELETE FROM note WHERE id = ? AND store_id = ?", (note_id, self.store_id))
-            tx.execute("DELETE FROM note_research WHERE note_id = ?", (note_id,))
 
     def notes(self, start: date | None = None, end: date | None = None) -> list[tuple[int, date, str]]:
         return [(n.id, n.day, n.text) for n in self.note_records(start, end)]

@@ -106,8 +106,10 @@ def test_stores_are_isolated(db, store):
     other = Store(db, db.create_store("옆집청과", "next@gmail.com"))
     assert other.ledger() == [] and other.notes() == [] and other.plan(D1) is None
     assert other.sheet_image(D1) is None and other.correction_stats()["확정한 줄"] == 0
-    other.delete_note(store.notes()[0][0])  # 다른 가게 메모는 지울 수 없다
-    assert len(store.notes()) == 2
+    note_id = store.notes()[0][0]
+    store.save_research(note_id, Research(True, "확인", (), ()))
+    other.delete_note(note_id)  # 다른 가게 메모와 그 AI 확인 결과는 지울 수 없다
+    assert len(store.notes()) == 2 and store.note_records()[0].research is not None
     other.save_day(D1, {"tomato": 9.0}, 1, 1)
     assert store.closing(D1)["tomato"] == 4.5
 

@@ -3,6 +3,7 @@
 마감 재고표 사진 → 확인·수정 → 발주 추천 → 승인 → 거래처 문자
 """
 
+import threading
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
@@ -14,7 +15,7 @@ from .agent import AgentPolicy
 from .auto_notes import HEAT_PREFIX, RAIN_PREFIX, AutoNote, WeatherSource, collect
 from .catalog import Catalog
 from .llm import ImageInput, LLMClient, LLMError
-from .market_calendar import MarketCalendar
+from .market_calendar import MarketCalendar, today_kst
 from .memory import DayMemoryBank
 from .research import describe_for_agent, research_note
 from .messages import LLMGreetingWriter, OrderMessage, build_messages
@@ -59,6 +60,8 @@ class StoreService:
         self.auto_notes = auto_notes  # 발주 추천을 만들 때 날씨·명절 메모를 먼저 가져온다
         self.weather = weather
         self.research_llm_factory = research_llm_factory  # 웹 검색이 되는 LLM (사장님 메모 확인)
+        # 발주 추천은 1~3분 걸린다. 새로고침·두 사람이 동시에 열어도 한 번만 만들게 한다
+        self._plan_lock = threading.Lock()
 
     # 지금 할 일 ------------------------------------------------------------------
 
@@ -66,12 +69,42 @@ class StoreService:
         """(할 일, 날짜). 마감한 날의 발주가 남았으면 발주, 아니면 다음 날 재고표."""
         last = self.store.last_closed_day()
         if last is None:
-            return SHEET, date.today()
+            return SHEET, today_kst()
         if self.calendar.is_supply_day(last + timedelta(days=1)):
             plan = self.store.plan(last)
             if plan is None or not plan.approved:
                 return ORDER, last
         return SHEET, last + timedelta(days=1)
+
+    def days_behind(self) -> int:
+        """할 일 날짜가 오늘(한국 시간)보다 며칠 전인지. 가게를 쉬었거나 기록을 빠뜨린 날이 있으면 1 이상."""
+        _, day = self.status()
+        return max(0, (today_kst() - day).days)
+
+    def skip(self) -> tuple[str, date]:
+        """지금 할 일을 건너뛴다 (가게를 쉰 날). 건너뛴 (할 일, 날짜)를 돌려준다.
+
+        재고표 차례면 그날은 아무것도 안 팔린 날로 기록한다 (마감 재고 = 전날 재고 + 그날 입고, 매출 0).
+        발주 차례면 발주 없이 넘어간다 (입고 0). 오늘 이후의 날은 건너뛸 수 없다.
+        건너뛰지 않으면 다음 재고표가 쉰 날의 날짜로 저장돼 이후 요일·장날 계산이 모두 하루씩 밀린다.
+        """
+        step, day = self.status()
+        if day > today_kst():
+            raise ValueError(f"{day}은(는) 아직 오지 않은 날이라 건너뛸 수 없습니다.")
+        if step == SHEET:
+            prev = self.store.closing(day - timedelta(days=1))
+            received = self.store.received(day)
+            closing = {i.id: prev.get(i.id, 0) + received.get(i.id, 0) for i in self.catalog.items}
+            self.store.save_day(day, closing, 0, 0)
+        else:
+            plan = self.store.plan(day)
+            lines = tuple(
+                OrderLineRecord(ln.item_id, ln.base, ln.recommended, 0, ln.factors, ln.reason) for ln in plan.lines
+            ) if plan else tuple(OrderLineRecord(i.id, 0, 0, 0, "", "") for i in self.catalog.items)
+            arrival = day + timedelta(days=1)
+            self.store.save_plan(OrderPlan(day, arrival, "발주 안 함 (건너뜀)", True, lines))
+            self.store.save_received(arrival, {})
+        return step, day
 
     # 재고표 ----------------------------------------------------------------------
 
@@ -169,7 +202,7 @@ class StoreService:
         같은 메모는 다시 넣지 않는다. 날씨를 가져왔으면 그 기간의 이전 날씨 메모는 새 예보로 바꾼다.
         """
         start, end = day + timedelta(days=1), day + timedelta(days=days_ahead)
-        notes, error = collect(start, end, date.today(), self.weather)
+        notes, error = collect(start, end, today_kst(), self.weather)
         if self.weather is not None and error is None:
             fresh = {(n.day, n.text) for n in notes if n.source == "날씨"}
             for note_id, d, text in self.store.notes(start, end):
@@ -252,7 +285,22 @@ class StoreService:
         return [m.describe(self.catalog, self.calendar) for m in self.memory.search(ctx, query)]
 
     def plan_for(self, day: date) -> OrderPlan | None:
-        return self.store.plan(day) or self.make_plan(day)
+        """저장된 추천, 없으면 새로 만든다. 다른 요청이 만드는 중이면 끝날 때까지 기다렸다가 그 결과를 쓴다."""
+        plan = self.store.plan(day)
+        if plan is not None:
+            return plan
+        with self._plan_lock:
+            return self.store.plan(day) or self.make_plan(day)
+
+    def remake_plan(self, day: date) -> OrderPlan | None:
+        """다시 추천 (메모를 고친 뒤 등). 다른 요청이 만드는 중이면 그 결과를 쓰고 또 만들지 않는다."""
+        if not self._plan_lock.acquire(blocking=False):
+            with self._plan_lock:
+                return self.store.plan(day)
+        try:
+            return self.make_plan(day)
+        finally:
+            self._plan_lock.release()
 
     def check_finals(self, day: date, finals: dict[str, int]) -> dict[str, str]:
         """입력한 발주 수량 중 확인이 필요한 것 (입력 실수 가드레일)."""

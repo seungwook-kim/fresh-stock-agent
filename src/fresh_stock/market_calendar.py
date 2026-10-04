@@ -1,7 +1,18 @@
 """장날(5일장)과 입고일(가락시장 휴장) 계산."""
 
 from dataclasses import dataclass
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
+
+# 가게는 한국에 있다. 서버가 다른 시간대(UTC 클라우드 등)에서 돌아도 날짜는 한국 기준으로 센다 (서머타임 없음)
+KST = timezone(timedelta(hours=9), "KST")
+
+
+def now_kst() -> datetime:
+    return datetime.now(KST)
+
+
+def today_kst() -> date:
+    return now_kst().date()
 
 
 @dataclass(frozen=True)

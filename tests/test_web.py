@@ -137,3 +137,12 @@ def test_messages_page():
     day = env.first - timedelta(days=1)
     r = env.client.get(f"/messages?day={day.isoformat()}")
     assert r.status_code == 200 and "거래처 문자" in r.text
+
+
+def test_skip_banner_when_behind():
+    env = WebEnv(FakeLLM())
+    env.login()
+    page = env.client.get("/")
+    assert "쉬는 날로 건너뛰기" in page.text  # 데모 기록은 7월에 끝나 오늘보다 앞선다
+    env.client.post("/skip")
+    assert env.store.last_closed_day() == env.first

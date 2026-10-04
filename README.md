@@ -147,8 +147,8 @@ PostgreSQL에서도 저장소 테스트를 돌릴 수 있다: `FRESH_STOCK_TEST_
 
 웹 화면 없이도 Claude Code나 Claude Desktop에서 말로 가게 업무를 볼 수 있다.
 
-- **MCP 서버** (`fresh-stock mcp`, `src/fresh_stock/mcp_server.py`): 오늘 할 일, 메모 추가·조회·AI 확인, 재고표 사진 읽기·확정, 발주 추천, 발주 승인, 거래처 문자, 매출, 품목 목록을 도구로 공개한다. `FRESH_STOCK_EMAIL`이 멤버인 가게만 다룬다 (웹과 같은 규칙)
-- **승인 안전장치**: `approve_order`는 사용자 승인 표시(`user_confirmed`)가 없으면 거절하고, 입력 실수 가드레일이 경고하면 승인하지 않고 경고를 돌려준다. 수량은 모두 코드가 계산한다
+- **MCP 서버** (`fresh-stock mcp`, `src/fresh_stock/mcp_server.py`): 오늘 할 일, 메모 추가·조회·AI 확인, 재고표 사진 읽기·확정, 발주 추천, 발주 승인, 거래처 문자, 매출, 품목 목록, 쉬는 날 건너뛰기를 도구로 공개한다. `FRESH_STOCK_EMAIL`이 멤버인 가게만 다룬다 (웹과 같은 규칙)
+- **승인 안전장치**: `approve_order`는 사용자 승인 표시(`user_confirmed`)가 없으면 거절하고, 입력 실수 가드레일이 경고하면 승인하지 않고 경고를 돌려준다. 재고 확정(`confirm_sheet`)은 읽은 줄을 그대로 쓰고 사람이 확인한 줄만 받으며, 확인 표시된 줄을 확인받지 않으면 저장하지 않는다. 수량은 모두 코드가 계산한다
 - **스킬** (`.claude/skills/fresh-stock-store/SKILL.md`): 하루 업무 순서, 확인 표시된 줄만 사람에게 묻기, 발주 수량을 지어내지 않기, 승인 전에 보여주고 묻기, 확인 못 한 메모를 부풀리지 않기를 이유와 함께 적었다
 
 연결: 이 폴더를 Claude Code로 열면 `.mcp.json`의 fresh-stock 서버와 스킬이 잡힌다. `.env`에 `FRESH_STOCK_EMAIL`(가게 멤버 이메일)과 `FRESH_STOCK_DB`를 넣는다. Claude Desktop은 설정의 MCP 서버에 `uv --directory <이 폴더> run fresh-stock mcp`를 추가한다.
@@ -272,4 +272,4 @@ PostgreSQL에서도 저장소 테스트를 돌릴 수 있다: `FRESH_STOCK_TEST_
 
 ## 기술
 
-Python 3.12, uv, FastAPI, Jinja2, SQLite, PostgreSQL(psycopg 3), Pillow, fastembed(로컬 다국어 임베딩), NumPy, Anthropic Python SDK, Claude Code CLI, authlib(구글 로그인), MCP Python SDK, pytest (149개).
+Python 3.12, uv, FastAPI, Jinja2, SQLite, PostgreSQL(psycopg 3), Pillow, fastembed(로컬 다국어 임베딩), NumPy, Anthropic Python SDK, Claude Code CLI, authlib(구글 로그인), MCP Python SDK, pytest (153개).

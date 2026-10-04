@@ -22,6 +22,7 @@ from starlette.middleware.sessions import SessionMiddleware
 from .demo import demo_sheet_image
 from .llm import LLMError
 from .recognition import parse_qty
+from .market_calendar import today_kst
 from .service import ORDER, StoreService
 from .store import OWNER, OWNER_NOTE, STAFF, Database
 
@@ -156,6 +157,7 @@ def create_app(
                 catalog=s.service.catalog,
                 step=step,
                 status_day=day,
+                today=today_kst(),
                 store_name=db.store_name(s.store_id),
                 role=s.role,
             )
@@ -332,6 +334,16 @@ def create_app(
             s.service.research_notes([note])
         return go("/")
 
+    @app.post("/skip")
+    def skip(request: Request):
+        """가게를 쉰 날: 재고표나 발주를 건너뛰어 날짜를 오늘로 맞춘다."""
+        s = current(request)
+        try:
+            s.service.skip()
+        except ValueError:
+            pass
+        return go("/")
+
     # 재고표 -------------------------------------------------------------------------
 
     @app.get("/sheet")
@@ -486,7 +498,7 @@ def create_app(
         s = current(request)
         step, day = s.service.status()
         if step == ORDER:
-            s.service.make_plan(day)
+            s.service.remake_plan(day)
         return go("/order")
 
     @app.post("/order")

@@ -63,14 +63,17 @@ class DayMemory:
 
 def day_outcome(
     ledger: list[DayRecord], idx: int, catalog: Catalog, calendar: MarketCalendar
-) -> tuple[dict[str, float], list[tuple[str, float]], dict[str, tuple[int, int]]]:
+) -> tuple[dict[str, float], list[tuple[str, float]], dict[str, tuple[int, int]]] | None:
     """ledger[idx]날 정가 판매가 평소 예측(요일·장날 보정)의 몇 배였는지. 분류별, 품목별, 분류별 품절 수.
 
     기록에 남는 건 수요가 아니라 판매다. 다 팔린 품목은 실제 수요가 더 컸으므로 품절 수를 함께 남긴다.
+    아무것도 팔리지 않은 날(가게를 쉰 날)은 수요 기록이 아니므로 None.
     """
     day = ledger[idx].day
     before = OrderContext(day - timedelta(days=1), day, [day], ledger[:idx], catalog, calendar)
     upto = OrderContext(day, day + timedelta(days=1), [day], ledger[: idx + 1], catalog, calendar)
+    if not any(q > 0 for q in upto._sales[-1].values()):
+        return None
     policy = SeasonalPolicy()
     expected_by_cat: dict[str, float] = {c.value: 0.0 for c in Category}
     actual_by_cat: dict[str, float] = {c.value: 0.0 for c in Category}
@@ -78,7 +81,7 @@ def day_outcome(
     sold_out = {c.value: [0, 0] for c in Category}
     for item in catalog.items:
         expected = policy.forecast(before, item, day)
-        actual = upto.demand_history(item.id)[-1][1]
+        actual = upto.demand_history(item.id)[-1][1]  # 이날은 팔린 날이라 마지막 기록이 이날이다
         # 금액 기준으로 합쳐서 봉 단위 품목이 분류 배율을 좌우하지 않게 한다
         expected_by_cat[item.category] += expected * item.price
         actual_by_cat[item.category] += actual * item.price
@@ -210,7 +213,7 @@ class DayMemoryBank:
         self.catalog = catalog
         self.calendar = calendar
         self.embedder = embedder
-        self._cache: dict[tuple[date, tuple[str, ...]], DayMemory] = {}
+        self._cache: dict[tuple[date, tuple[str, ...]], DayMemory | None] = {}
 
     def memories(self, ledger: list[DayRecord], note_log: dict[date, list[str]]) -> list[DayMemory]:
         index = {rec.day: i for i, rec in enumerate(ledger)}
@@ -221,9 +224,14 @@ class DayMemoryBank:
                 continue
             key = (day, tuple(notes))
             if key not in self._cache:
-                ratios, items, sold_out = day_outcome(ledger, idx, self.catalog, self.calendar)
-                self._cache[key] = DayMemory(day, tuple(notes), ratios, tuple(items), sold_out)
-            out.append(self._cache[key])
+                outcome = day_outcome(ledger, idx, self.catalog, self.calendar)
+                if outcome is None:
+                    self._cache[key] = None
+                else:
+                    ratios, items, sold_out = outcome
+                    self._cache[key] = DayMemory(day, tuple(notes), ratios, tuple(items), sold_out)
+            if self._cache[key] is not None:
+                out.append(self._cache[key])
         return out
 
     def search(self, ctx: OrderContext, query: str, k: int = 3) -> list[DayMemory]:

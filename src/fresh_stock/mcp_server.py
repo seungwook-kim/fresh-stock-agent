@@ -19,12 +19,14 @@ from mcp.types import ToolAnnotations
 
 from .recognition import parse_qty
 from .research import match_item
+from .market_calendar import today_kst
 from .service import ORDER, SHEET, StoreService
 from .store import OWNER_NOTE, Database, Note
 
 INSTRUCTIONS = """청과 매장 재고·발주 도구다. 하루 업무 순서: today로 할 일 확인 → 사장님 메모 추가(add_note) →
-마감 재고표 사진 읽기(read_sheet) → 사람이 확인한 재고 확정(confirm_sheet) → 발주 추천 보기(get_order_plan) →
+마감 재고표 사진 읽기(read_sheet) → 확인 필요한 줄만 사용자에게 확인받아 확정(confirm_sheet) → 발주 추천 보기(get_order_plan) →
 사용자에게 보여주고 승인받은 뒤 approve_order → 거래처 문자(get_messages).
+today의 days_behind가 1 이상이면 할 일 날짜가 오늘보다 앞선 것이다. 그날 가게를 쉬었는지 물어보고 skip_day로 넘긴다.
 수량은 모두 코드가 계산한다. 발주 수량을 직접 지어내지 말고 추천을 그대로 보여준 뒤 사용자가 바꾸라는 것만 바꾼다."""
 
 READ_ONLY = ToolAnnotations(read_only_hint=True, open_world_hint=False)
@@ -80,12 +82,38 @@ def build_server(db: Database, make_service: Callable[[int], StoreService], emai
         sid, service = use(store_id)
         step, day = service.status()
         action = "마감 재고표 사진을 읽고(read_sheet) 확정(confirm_sheet)" if step == SHEET else "발주 추천 확인(get_order_plan) 후 승인"
-        return {
+        result = {
             "store": db.store_name(sid),
+            "today": today_kst().isoformat(),
             "step": "재고표" if step == SHEET else "발주",
             "day": day.isoformat(),
+            "days_behind": service.days_behind(),
             "next_action": action,
             "notes": [_note_dict(n, service) for n in service.store.note_records(start=day)],
+        }
+        if result["days_behind"]:
+            result["warning"] = (
+                f"할 일 날짜({day})가 오늘보다 앞섭니다. 그날 가게를 쉬었다면 사용자 확인 후 skip_day로 넘기세요. "
+                f"그대로 재고표를 올리면 오늘 재고가 {day} 기록으로 저장됩니다."
+            )
+        return result
+
+    @server.tool(annotations=WRITES)
+    def skip_day(user_confirmed: bool, store_id: int | None = None) -> dict:
+        """가게를 쉰 날을 건너뛴다. 재고표 차례면 그날을 판매 없는 날로, 발주 차례면 발주 없이 넘긴다.
+        사용자가 그날 쉬었다(또는 주문하지 않았다)고 확인했을 때만 user_confirmed=true."""
+        if not user_confirmed:
+            raise ToolError("사용자에게 그날 가게를 쉬었는지 확인한 뒤 user_confirmed=true로 불러 주세요.")
+        _, service = use(store_id)
+        try:
+            step, day = service.skip()
+        except ValueError as e:
+            raise ToolError(str(e)) from e
+        next_step, next_day = service.status()
+        return {
+            "skipped": f"{day} {'재고표 (쉬는 날)' if step == SHEET else '발주 (발주 없음)'}",
+            "now": {"step": "재고표" if next_step == SHEET else "발주", "day": next_day.isoformat()},
+            "days_behind": service.days_behind(),
         }
 
     @server.tool(annotations=READ_ONLY)
@@ -119,8 +147,8 @@ def build_server(db: Database, make_service: Callable[[int], StoreService], emai
 
     @server.tool(annotations=WRITES)
     def read_sheet(image_path: str, store_id: int | None = None) -> dict:
-        """마감 재고표 사진(jpg/png 파일 경로)을 AI가 읽는다. 확인이 필요한 줄(flags)은 사용자에게 사진과 비교해
-        달라고 해야 한다. 읽은 결과는 confirm_sheet로 확정해야 저장된다."""
+        """마감 재고표 사진(jpg/png 파일 경로)을 AI가 읽는다. needs_check가 있는 줄만 사용자에게 사진과 비교해
+        달라고 한다. 읽은 결과는 confirm_sheet로 확정해야 저장된다."""
         _, service = use(store_id)
         step, day = service.status()
         if step != SHEET:
@@ -136,6 +164,7 @@ def build_server(db: Database, make_service: Callable[[int], StoreService], emai
             "day": day.isoformat(),
             "rows": [
                 {
+                    "line": r.idx,
                     "written": f"{r.raw_name} {r.raw_qty}",
                     "item": service.catalog.item(r.item_id_read).name if r.item_id_read else None,
                     "qty": r.qty_read,
@@ -147,34 +176,67 @@ def build_server(db: Database, make_service: Callable[[int], StoreService], emai
         }
 
     @server.tool(annotations=WRITES)
-    def confirm_sheet(rows: list[dict], cash: int = 0, card: int = 0, store_id: int | None = None) -> dict:
-        """사용자가 확인한 마감 재고를 확정한다. rows는 [{"item": 품목 이름, "qty": "4.5" 또는 "4반"}, ...].
-        적지 않은 품목은 재고 0으로 저장된다. cash·card는 오늘 돈통 현금과 카드 합계."""
+    def confirm_sheet(
+        cash: int, card: int, corrections: list[dict] | None = None, store_id: int | None = None
+    ) -> dict:
+        """마감 재고를 확정한다. cash·card는 오늘 돈통 현금과 카드 합계 (사용자에게 물어서 넣는다).
+
+        read_sheet로 읽은 줄은 그대로 쓰고, corrections에는 사용자가 확인하거나 고친 줄만 넣는다:
+        [{"line": 3, "qty": "4반"}, {"line": 7, "item": "사과", "qty": "2"}, {"item": "참외", "qty": "1"}].
+        line은 read_sheet의 줄 번호, line 없이 item만 주면 그 품목 줄을 고치거나 새 줄로 더한다.
+        needs_check가 있는 줄은 모두 corrections로 확인받아야 저장된다 (읽은 값이 맞으면 그 값 그대로 넣는다).
+        재고표를 읽지 않았으면 corrections가 재고표 전체이고, 적지 않은 품목은 재고 0이다."""
         _, service = use(store_id)
         step, day = service.status()
         if step != SHEET:
             raise ToolError(f"지금은 {day} 발주를 확인할 차례입니다.")
-        sheet = service.store.sheet_rows(day)
-        used: set[int] = set()
-        finals: dict[int, tuple[str | None, float | None]] = {}
+        if cash < 0 or card < 0:
+            raise ToolError("현금·카드 합계는 0 이상이어야 합니다.")
+        sheet = {r.idx: r for r in service.store.sheet_rows(day)}
+        if not sheet and not corrections:
+            raise ToolError("읽은 재고표가 없습니다. read_sheet로 사진을 읽거나 corrections에 재고 전체를 넣어 주세요.")
+        known_ids = {i.id for i in service.catalog.items}
+        finals: dict[int, tuple[str | None, float | None]] = {
+            idx: (r.item_id_read, r.qty_read) for idx, r in sheet.items()
+        }
+        checked: set[int] = set()
         errors = []
-        next_idx = max((r.idx for r in sheet), default=-1) + 1
-        for row in rows:
-            name, qty_text = str(row.get("item", "")), str(row.get("qty", ""))
-            item_id = match_item(name, service.catalog) or (name if name in {i.id for i in service.catalog.items} else None)
+        next_idx = max(sheet, default=-1) + 1
+        for c in corrections or []:
+            name, qty_text = str(c.get("item") or "").strip(), str(c.get("qty", "")).strip()
             qty = parse_qty(qty_text)
-            if item_id is None or qty is None:
+            item_id = (match_item(name, service.catalog) or (name if name in known_ids else None)) if name else None
+            line = c.get("line")
+            if line is not None:
+                if int(line) not in sheet:
+                    errors.append(f"없는 줄 번호 {line}")
+                    continue
+                idx = int(line)
+                item_id = item_id or (None if name else sheet[idx].item_id_read)
+            elif item_id is None:
                 errors.append(f"{name} {qty_text}")
                 continue
-            # 읽은 재고표 줄과 맞춰 "모델이 읽은 값 → 사람이 확정한 값"을 남긴다
-            idx = next((r.idx for r in sheet if r.item_id_read == item_id and r.idx not in used), None)
-            if idx is None:
-                idx, next_idx = next_idx, next_idx + 1
-            used.add(idx)
+            else:
+                # 읽은 줄 중 같은 품목을 고친다. 없으면 빠뜨린 품목을 새 줄로 더한다
+                idx = next((i for i, r in sheet.items() if r.item_id_read == item_id and i not in checked), None)
+                if idx is None:
+                    idx, next_idx = next_idx, next_idx + 1
+            if qty is None or (item_id is None and qty != 0):
+                errors.append(f"{name or f'{line}번 줄'} {qty_text}")
+                continue
             finals[idx] = (item_id, qty)
+            checked.add(idx)
         if errors:
             raise ToolError(f"품목이나 수량을 알 수 없습니다: {', '.join(errors)}. 아무것도 저장하지 않았습니다.")
-        missing = service.missing_items(day, sheet) if sheet else []
+        unchecked = [r for idx, r in sheet.items() if r.flags and idx not in checked]
+        if unchecked:
+            lines = ", ".join(f"{r.idx}번 '{r.raw_name} {r.raw_qty}'" for r in unchecked)
+            raise ToolError(
+                f"확인이 필요한 줄을 아직 확인받지 않았습니다: {lines}. 사용자에게 사진과 비교해 맞는 값을 받아 "
+                "corrections에 line과 함께 넣어 주세요. 아무것도 저장하지 않았습니다."
+            )
+        rows = list(sheet.values())
+        missing = service.missing_items(day, rows) if rows else []
         closing = service.confirm_sheet(day, finals, cash, card)
         next_step, _ = service.status()
         return {
