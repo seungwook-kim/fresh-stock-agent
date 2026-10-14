@@ -1,9 +1,10 @@
 """모바일 웹 화면 (FastAPI + Jinja2).
 
-    로그인(구글) → 가게 선택 → 홈 → 재고표 사진 → 확인·수정 → 발주 추천 → 승인 → 거래처 문자
+    로그인(구글) → 가게 선택 → 홈 → (입고 확인) → 재고표 사진 → 확인·수정 → 발주 추천 → 승인 → 거래처 문자
 
 여러 가게가 함께 쓴다. 로그인한 구글 계정 이메일이 가게 멤버일 때만 그 가게 화면을 볼 수 있고,
-모든 데이터는 가게별로 나뉜다. 멤버 추가·삭제는 사장님(owner)만 할 수 있다.
+모든 데이터는 가게별로 나뉜다. 멤버 추가·삭제와 가게 설정(품목·거래처, 장날·입고 요일, 경험 노트)은
+사장님(owner)만 할 수 있다.
 """
 
 import json
@@ -20,10 +21,11 @@ from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
 
 from .demo import demo_sheet_image
+from .domain import CHANNELS, UNITS, Category
 from .llm import LLMError
 from .recognition import parse_qty
 from .market_calendar import today_kst
-from .service import ORDER, StoreService
+from .service import ORDER, SHEET, StoreService
 from .store import OWNER, OWNER_NOTE, STAFF, Database
 
 WEEKDAYS = "월화수목금토일"
@@ -31,6 +33,10 @@ GOOGLE_AUTHORIZE_URL = "https://accounts.google.com/o/oauth2/v2/auth"
 GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token"
 GOOGLE_USERINFO_URL = "https://www.googleapis.com/oauth2/v3/userinfo"
 SESSION_DAYS = 30
+# 5일장 날짜 (날짜 끝자리)
+MARKET_CHOICES = (
+    ("", "장 없음"), ("1,6", "1·6일"), ("2,7", "2·7일"), ("3,8", "3·8일"), ("4,9", "4·9일"), ("0,5", "5·10일"),
+)  # fmt: skip
 
 
 @dataclass
@@ -147,7 +153,9 @@ def create_app(
         if role is None:
             request.session.pop("store_id", None)
             raise Redirect("/stores")
-        return Session(email, store_id, role, service_for(store_id))
+        service = service_for(store_id)
+        service.refresh()  # 다른 화면이나 MCP에서 가게 설정을 고쳤을 수 있다
+        return Session(email, store_id, role, service)
 
     def render(request: Request, name: str, s: Session | None = None, **context):
         base = {"user": request.session.get("email"), "auth": auth}
@@ -347,10 +355,21 @@ def create_app(
     # 재고표 -------------------------------------------------------------------------
 
     @app.get("/sheet")
-    def sheet(request: Request, error: str = ""):
+    def sheet(request: Request, error: str = "", saved: int = 0):
         s = current(request)
         _, day = s.service.status()
-        return render(request, "sheet.html", s, day=day, has_rows=bool(s.service.store.sheet_rows(day)), error=error)
+        ordered, received = s.service.arrivals(day)
+        return render(
+            request,
+            "sheet.html",
+            s,
+            day=day,
+            has_rows=bool(s.service.store.sheet_rows(day)),
+            error=error,
+            n_received=sum(1 for q in received.values() if q > 0),
+            n_differs=sum(1 for i in ordered.keys() | received.keys() if ordered.get(i, 0) != received.get(i, 0)),
+            saved=saved,
+        )
 
     def _read(service: StoreService, day: date, image: bytes, media_type: str):
         try:
@@ -460,7 +479,7 @@ def create_app(
         ctx = service.order_context(day)
         stock = service.store.closing(day)
         order = {item.id: n for n, item in enumerate(catalog.items)}
-        all_lines = sorted(plan.lines, key=lambda ln: order[ln.item_id])
+        all_lines = sorted(plan.lines, key=lambda ln: order.get(ln.item_id, len(order)))
         groups = []
         for supplier in catalog.suppliers:
             lines = [ln for ln in all_lines if catalog.item(ln.item_id).supplier_id == supplier.id]
@@ -528,6 +547,220 @@ def create_app(
         return render(
             request, "messages.html", s, day=day, messages=s.service.messages(day, greeting=greeting), greeting=greeting
         )
+
+    # 입고 확인 -------------------------------------------------------------------------
+
+    def _received_page(request: Request, s: Session, day: date, entered: dict[str, str] | None = None, error: str = ""):
+        service = s.service
+        ordered, received = service.arrivals(day)
+        lines = [i for i in service.catalog.items if ordered.get(i.id, 0) > 0 or received.get(i.id, 0) > 0]
+        return render(
+            request,
+            "received.html",
+            s,
+            day=day,
+            lines=lines,
+            ordered=ordered,
+            received=received,
+            entered=entered or {},
+            error=error,
+            has_rows=bool(service.store.sheet_rows(day)),
+        )
+
+    @app.get("/received")
+    def received_page(request: Request):
+        s = current(request)
+        step, day = s.service.status()
+        if step != SHEET:
+            return go("/")
+        return _received_page(request, s, day)
+
+    @app.post("/received")
+    async def fix_received(request: Request):
+        """실제로 들어온 양으로 고친다. 칸 이름: recv_<품목 id>, 추가 줄은 add_item_<n> + add_qty_<n>."""
+        s = current(request)
+        step, day = s.service.status()
+        if step != SHEET:
+            return go("/")
+        form = await request.form()
+        entered = {k: str(v).strip() for k, v in form.items()}
+        changes: dict[str, float] = {}
+        bad = []
+        pairs = [(k.removeprefix("recv_"), v) for k, v in entered.items() if k.startswith("recv_")]
+        pairs += [(entered[k], entered.get(f"add_qty_{k.removeprefix('add_item_')}", ""))
+                  for k in entered if k.startswith("add_item_") and entered[k]]  # fmt: skip
+        known = {i.id for i in s.service.catalog.items}
+        for item_id, text in pairs:
+            qty = parse_qty(text) if text else 0.0
+            if item_id not in known or qty is None:
+                bad.append(f"{s.service.catalog.item(item_id).name if item_id in known else item_id} '{text}'")
+            else:
+                # 목록의 칸은 들어온 양 그대로, 추가 줄에서 목록에 있는 품목을 또 고르면 더한다
+                changes[item_id] = changes.get(item_id, 0.0) + qty
+        if bad:
+            return _received_page(request, s, day, entered, f"수량을 알 수 없습니다: {', '.join(bad)}")
+        try:
+            s.service.fix_received(day, changes)
+        except ValueError as e:
+            return _received_page(request, s, day, entered, str(e))
+        return go("/sheet?saved=1")
+
+    # 가게 설정 (품목·거래처, 장날·입고 요일, 경험 노트) ---------------------------------------
+
+    def _owner_only(s: Session) -> RedirectResponse | None:
+        if s.role != OWNER:
+            return go("/settings?" + urlencode({"error": "가게 설정은 사장님만 고칠 수 있습니다."}))
+        return None
+
+    @app.get("/settings")
+    def settings(request: Request, error: str = "", saved: str = ""):
+        s = current(request)
+        service = s.service
+        catalog = service.catalog
+        groups = [(sup, [i for i in catalog.items if i.supplier_id == sup.id]) for sup in catalog.suppliers]
+        return render(
+            request,
+            "settings.html",
+            s,
+            groups=groups,
+            retired=catalog.retired,
+            channels=CHANNELS,
+            market_choices=MARKET_CHOICES,
+            market_value=",".join(str(d) for d in sorted(service.calendar.market_day_digits)),
+            closed=set(service.calendar.no_supply_weekdays),
+            weekdays=WEEKDAYS,
+            knowledge=service.knowledge,
+            customized=service.store.catalog() is not None,
+            error=error,
+            saved=saved,
+        )
+
+    def _item_page(request: Request, s: Session, item_id: str | None, values: dict[str, str], error: str = ""):
+        return render(
+            request,
+            "item.html",
+            s,
+            item_id=item_id,
+            values=values,
+            categories=[c.value for c in Category],
+            units=UNITS,
+            error=error,
+        )
+
+    @app.get("/settings/item")
+    def item_form(request: Request, item_id: str | None = None):
+        s = current(request)
+        denied = _owner_only(s)
+        if denied:
+            return denied
+        catalog = s.service.catalog
+        if item_id is not None and item_id not in {i.id for i in catalog.all_items}:
+            return go("/settings")
+        if item_id is None:
+            values = {"category": Category.VEGETABLE.value, "unit": UNITS[0], "supplier_id": catalog.suppliers[0].id,
+                      "shelf_life": "2"}  # fmt: skip
+        else:
+            i = catalog.item(item_id)
+            values = {"name": i.name, "category": i.category.value, "unit": i.unit, "supplier_id": i.supplier_id,
+                      "base_demand": f"{i.base_demand:g}", "price": str(i.price), "cost": str(i.cost),
+                      "shelf_life": str(i.shelf_life)}  # fmt: skip
+        return _item_page(request, s, item_id, values)
+
+    @app.post("/settings/item")
+    async def save_item(request: Request):
+        s = current(request)
+        denied = _owner_only(s)
+        if denied:
+            return denied
+        form = await request.form()
+        values = {k: str(v).strip() for k, v in form.items()}
+        item_id = values.get("item_id") or None
+        try:
+            numbers = {}
+            for key, label, cast in (("base_demand", "하루 판매량", float), ("price", "판매가", int),
+                                     ("cost", "매입가", int), ("shelf_life", "정가로 파는 기간", int)):  # fmt: skip
+                text = values.get(key, "").replace(",", "")
+                try:
+                    numbers[key] = cast(text)
+                except ValueError:
+                    raise ValueError(f"{label}에 숫자를 적어 주세요.") from None
+            item = s.service.save_item(
+                item_id,
+                name=values.get("name", ""),
+                category=values.get("category", ""),
+                unit=values.get("unit", ""),
+                supplier_id=values.get("supplier_id", ""),
+                **numbers,
+            )
+        except ValueError as e:
+            return _item_page(request, s, item_id, values, str(e))
+        return go("/settings?" + urlencode({"saved": f"{item.name} 저장했어요."}))
+
+    @app.post("/settings/item/{item_id}/active")
+    def set_item_active(request: Request, item_id: str, active: int = Form(...)):
+        s = current(request)
+        denied = _owner_only(s)
+        if denied:
+            return denied
+        try:
+            s.service.set_item_active(item_id, bool(active))
+        except ValueError as e:
+            return go("/settings?" + urlencode({"error": str(e)}))
+        name = s.service.catalog.item(item_id).name
+        return go("/settings?" + urlencode({"saved": f"{name}: {'다시 취급해요' if active else '취급을 그만뒀어요'}."}))
+
+    @app.post("/settings/supplier")
+    def save_supplier(request: Request, name: str = Form(""), channel: str = Form(""), supplier_id: str = Form("")):
+        s = current(request)
+        denied = _owner_only(s)
+        if denied:
+            return denied
+        try:
+            supplier = s.service.save_supplier(supplier_id or None, name=name, channel=channel)
+        except ValueError as e:
+            return go("/settings?" + urlencode({"error": str(e)}))
+        return go("/settings?" + urlencode({"saved": f"{supplier.name} 저장했어요."}))
+
+    @app.post("/settings/supplier/{supplier_id}/delete")
+    def delete_supplier(request: Request, supplier_id: str):
+        s = current(request)
+        denied = _owner_only(s)
+        if denied:
+            return denied
+        try:
+            s.service.delete_supplier(supplier_id)
+        except ValueError as e:
+            return go("/settings?" + urlencode({"error": str(e)}))
+        return go("/settings?" + urlencode({"saved": "거래처를 지웠어요."}))
+
+    @app.post("/settings/calendar")
+    async def save_calendar(request: Request):
+        s = current(request)
+        denied = _owner_only(s)
+        if denied:
+            return denied
+        form = await request.form()
+        market = str(form.get("market") or "")
+        closed = [str(v) for v in form.getlist("closed")]
+        try:
+            if market not in {v for v, _ in MARKET_CHOICES} or not all(c.isdigit() for c in closed):
+                raise ValueError("장날이나 요일 값이 잘못됐습니다.")
+            s.service.save_calendar(tuple(int(d) for d in market.split(",") if d), tuple(int(c) for c in closed))
+        except ValueError as e:
+            return go("/settings?" + urlencode({"error": str(e)}))
+        return go("/settings?" + urlencode({"saved": "장날·입고 요일을 저장했어요."}))
+
+    @app.post("/settings/knowledge")
+    def save_knowledge(request: Request, text: str = Form("")):
+        s = current(request)
+        denied = _owner_only(s)
+        if denied:
+            return denied
+        try:
+            s.service.save_knowledge(text)
+        except ValueError as e:
+            return go("/settings?" + urlencode({"error": str(e)}))
+        return go("/settings?" + urlencode({"saved": "경험 노트를 저장했어요."}))
 
     # AI 호출 기록 (가게별) -------------------------------------------------------------
 

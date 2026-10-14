@@ -215,6 +215,12 @@ class DayMemoryBank:
         self.embedder = embedder
         self._cache: dict[tuple[date, tuple[str, ...]], DayMemory | None] = {}
 
+    def use(self, catalog: Catalog, calendar: MarketCalendar) -> None:
+        """가게 설정(품목, 장날)이 바뀌면 바뀐 설정으로 다시 계산한다."""
+        if (catalog, calendar) != (self.catalog, self.calendar):
+            self.catalog, self.calendar = catalog, calendar
+            self._cache.clear()
+
     def memories(self, ledger: list[DayRecord], note_log: dict[date, list[str]]) -> list[DayMemory]:
         index = {rec.day: i for i, rec in enumerate(ledger)}
         out = []

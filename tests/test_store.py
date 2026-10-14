@@ -8,6 +8,7 @@ from datetime import date
 
 import pytest
 
+from fresh_stock.catalog import load_catalog
 from fresh_stock.store import OWNER, STAFF, TABLES, Database, OrderLineRecord, OrderPlan, Research, SheetRowRecord, Store
 
 PG_URL = os.environ.get("FRESH_STOCK_TEST_PG")
@@ -54,6 +55,8 @@ def _fill(s: Store) -> None:
     ]
     s.save_sheet(D1, b"\xff\xd8jpg", rows)
     s.finalize_sheet_rows(D1, {0: ("tomato", 4.5), 1: ("cherry_tomato", 2.0)})
+    s.save_catalog(load_catalog().with_active("apple", False))
+    s.save_setting("market_days", "1,6")
 
 
 def test_day_records_and_ledger(store):
@@ -136,6 +139,7 @@ def test_dump_and_load_between_backends(db, store):
     assert copied.ledger() == store.ledger()
     assert copied.plan(D1) == store.plan(D1)
     assert copied.sheet_image(D1) == store.sheet_image(D1)
+    assert copied.catalog() == store.catalog() and copied.settings() == {"market_days": "1,6"}
     copied.add_note(D2, "새 메모")  # 옮긴 뒤에도 id가 겹치지 않는다
     assert len({i for i, _, _ in copied.notes()}) == 3
     assert target.create_store("새 가게", "a@b.c") != store.store_id
@@ -193,3 +197,28 @@ def test_load_dotenv(tmp_path, monkeypatch):
     assert os.environ["FRESH_STOCK_DB"] == "postgresql://u:p@h/db"
     assert os.environ["FRESH_STOCK_LLM"] == "claude-code"
     assert "FRESH_STOCK_LAT" not in os.environ  # 빈 값은 설정하지 않은 것
+
+
+def test_catalog_and_settings_per_store(db, store):
+    assert store.catalog() is None and store.settings() == {}  # 고치기 전에는 기본 목록을 쓴다
+    catalog = load_catalog().with_active("apple", False)
+    store.save_catalog(catalog)
+    loaded = store.catalog()
+    assert loaded == catalog  # 순서와 취급 여부까지 그대로
+    assert "apple" not in {i.id for i in loaded.items} and loaded.item("apple").name == "사과"
+    store.save_setting("knowledge", "장날은 2배")
+    store.save_setting("knowledge", "장날은 1.5배")  # 같은 키는 덮어쓴다
+    assert store.settings() == {"knowledge": "장날은 1.5배"}
+    other = Store(db, db.create_store("2호점", "boss@gmail.com"))
+    assert other.catalog() is None and other.settings() == {}
+
+
+def test_delete_unapproved_plan_only(store):
+    lines = (OrderLineRecord("tomato", 5, 5, 5, "", ""),)
+    store.save_plan(OrderPlan(D1, D2, "추천", False, lines))
+    store.delete_unapproved_plan(D1)
+    assert store.plan(D1) is None
+    store.save_plan(OrderPlan(D1, D2, "승인", True, lines))
+    store.delete_unapproved_plan(D1)
+    assert store.plan(D1).approved
+    store.delete_unapproved_plan(D2)  # 없는 발주는 그냥 넘어간다

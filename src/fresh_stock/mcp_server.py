@@ -3,7 +3,7 @@
     FRESH_STOCK_EMAIL=boss@gmail.com uv run fresh-stock mcp      # stdio
 
 FRESH_STOCK_EMAIL이 멤버인 가게만 다룬다 (웹 화면과 같은 규칙). 도구는 웹 화면의 업무 흐름을 그대로 따른다:
-오늘 할 일 → 메모 → 재고표 읽기·확정 → 발주 추천 → 사람 승인 → 거래처 문자.
+오늘 할 일 → 메모 → (입고 확인) → 재고표 읽기·확정 → 발주 추천 → 사람 승인 → 거래처 문자.
 
 발주 승인은 사용자에게 추천을 보여주고 승인을 받았다는 표시(user_confirmed)가 있어야만 하고,
 입력 실수 가드레일도 웹과 똑같이 걸린다. 수량 계산은 모두 코드가 한다.
@@ -24,6 +24,7 @@ from .service import ORDER, SHEET, StoreService
 from .store import OWNER_NOTE, Database, Note
 
 INSTRUCTIONS = """청과 매장 재고·발주 도구다. 하루 업무 순서: today로 할 일 확인 → 사장님 메모 추가(add_note) →
+주문과 다르게 들어온 물건이 있으면 입고 수정(get_arrivals, fix_received) →
 마감 재고표 사진 읽기(read_sheet) → 확인 필요한 줄만 사용자에게 확인받아 확정(confirm_sheet) → 발주 추천 보기(get_order_plan) →
 사용자에게 보여주고 승인받은 뒤 approve_order → 거래처 문자(get_messages).
 today의 days_behind가 1 이상이면 할 일 날짜가 오늘보다 앞선 것이다. 그날 가게를 쉬었는지 물어보고 skip_day로 넘긴다.
@@ -66,6 +67,7 @@ def build_server(db: Database, make_service: Callable[[int], StoreService], emai
             raise ToolError(f"{email}은(는) 가게 {store_id}의 멤버가 아닙니다.")
         if store_id not in services:
             services[store_id] = make_service(store_id)
+        services[store_id].refresh()  # 웹 화면에서 가게 설정을 고쳤을 수 있다
         return store_id, services[store_id]
 
     @server.tool(annotations=READ_ONLY)
@@ -144,6 +146,51 @@ def build_server(db: Database, make_service: Callable[[int], StoreService], emai
             raise ToolError("웹 검색이 되는 AI가 설정되지 않았습니다 (claude-code 백엔드 필요).")
         service.research_notes([note])
         return _note_dict(next(n for n in service.store.note_records() if n.id == note_id), service)
+
+    @server.tool(annotations=READ_ONLY)
+    def get_arrivals(store_id: int | None = None) -> dict:
+        """오늘 재고표를 쓸 날에 들어온 물건: 승인한 발주 수량(ordered)과 입고로 기록된 양(received).
+        발주를 승인하면 주문 수량이 그대로 입고로 기록되므로, 다르게 들어왔으면 fix_received로 고친다."""
+        _, service = use(store_id)
+        step, day = service.status()
+        if step != SHEET:
+            raise ToolError(f"지금은 {day} 발주를 확인할 차례입니다. 입고는 재고표 차례에 확인합니다.")
+        ordered, received = service.arrivals(day)
+        lines = [
+            {"item": i.name, "unit": i.unit, "ordered": ordered.get(i.id, 0), "received": received.get(i.id, 0)}
+            for i in service.catalog.items
+            if ordered.get(i.id, 0) > 0 or received.get(i.id, 0) > 0
+        ]
+        return {"day": day.isoformat(), "lines": lines}
+
+    @server.tool(annotations=WRITES)
+    def fix_received(changes: dict[str, float], user_confirmed: bool, store_id: int | None = None) -> dict:
+        """입고를 실제로 들어온 양으로 고친다 (덜 왔거나, 시장에 물건이 없었거나, 더 사 온 경우).
+        changes는 사용자가 말한 품목만 {품목 이름: 실제로 들어온 양}. 사용자가 그 수량을 말했을 때만 user_confirmed=true.
+        재고표를 확정하기 전에만 고칠 수 있다. 판매량은 어제 재고 + 입고 - 오늘 재고로 계산하므로 입고가 틀리면 판매량도 틀린다."""
+        if not user_confirmed:
+            raise ToolError("사용자에게 실제로 들어온 양을 확인받은 뒤 user_confirmed=true로 불러 주세요.")
+        _, service = use(store_id)
+        _, day = service.status()
+        resolved, unknown = {}, []
+        for name, qty in changes.items():
+            item_id = match_item(name, service.catalog)
+            if item_id is None:
+                unknown.append(name)
+            else:
+                resolved[item_id] = float(qty)
+        if unknown:
+            raise ToolError(f"알 수 없는 품목: {', '.join(unknown)}. 아무것도 고치지 않았습니다.")
+        try:
+            received = service.fix_received(day, resolved)
+        except ValueError as e:
+            raise ToolError(str(e)) from e
+        catalog = service.catalog
+        return {
+            "day": day.isoformat(),
+            "fixed": {catalog.item(i).name: received.get(i, 0) for i in resolved},
+            "next_action": "read_sheet로 마감 재고표 읽기",
+        }
 
     @server.tool(annotations=WRITES)
     def read_sheet(image_path: str, store_id: int | None = None) -> dict:
@@ -259,7 +306,7 @@ def build_server(db: Database, make_service: Callable[[int], StoreService], emai
         stock = service.store.closing(day)
         cover = service.calendar.cover_days(plan.arrival)
         order = {item.id: n for n, item in enumerate(catalog.items)}
-        lines = sorted(plan.lines, key=lambda ln: order[ln.item_id])
+        lines = sorted(plan.lines, key=lambda ln: order.get(ln.item_id, len(order)))
         return {
             "order_day": day.isoformat(),
             "arrival": plan.arrival.isoformat(),

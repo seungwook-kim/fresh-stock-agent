@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+{% set active = "sheet" %}
+{% block title %}입고 확인{% endblock %}
+{% macro item_select(name, selected) %}
+  <select name="{{ name }}" style="max-width:9.5em">
+    <option value="">품목 선택</option>
+    {% for item in catalog.items %}
+      <option value="{{ item.id }}" {{ 'selected' if item.id == selected }}>{{ item.name }} ({{ item.unit }})</option>
+    {% endfor %}
+  </select>
+{% endmacro %}
+{% block content %}
+<h1>{{ day | day }} 입고 확인</h1>
+{% if error %}<div class="alert">{{ error }}</div>{% endif %}
+<div class="note">
+  승인한 발주 수량이 그대로 들어온 걸로 기록돼 있어요. 덜 왔거나, 시장에 물건이 없었거나, 더 사 온 품목만 고쳐 주세요.
+  판매량을 "어제 재고 + 입고 − 오늘 재고"로 계산해서, 입고가 틀리면 판매량과 다음 발주도 같이 틀려요.
+</div>
+{% if has_rows %}
+  <p class="muted">재고표를 이미 읽었어요. 입고를 고쳐도 읽어 둔 줄의 확인 표시는 그대로예요. 확인 화면에서 숫자를 한 번 더 봐 주세요.</p>
+{% endif %}
+<form method="post" action="/received">
+<div class="card" style="padding:6px 8px">
+  <table>
+    <colgroup><col><col class="num-col"><col class="qty-col"></colgroup>
+    <tr><th>품목</th><th class="num">주문</th><th class="num">들어온 양</th></tr>
+    {% for item in lines %}
+      {% set key = 'recv_' ~ item.id %}
+      {% set got = received.get(item.id, 0) %}
+      <tr class="{{ 'flag' if got != ordered.get(item.id, 0) }}">
+        <td>{{ item.name }} <span class="muted">{{ item.unit }}</span></td>
+        <td class="num">{{ '%g' % ordered.get(item.id, 0) }}</td>
+        <td class="num"><input class="qty" name="{{ key }}" inputmode="decimal"
+          value="{{ entered[key] if key in entered else '%g' % got }}"></td>
+      </tr>
+    {% else %}
+      <tr><td colspan="3" class="muted">이날 들어오기로 한 물건이 없어요.</td></tr>
+    {% endfor %}
+  </table>
+</div>
+
+<div class="card">
+  <b>주문에 없던 품목 추가</b>
+  <p class="muted" style="margin:4px 0">시장에서 더 사 왔거나 거래처가 다른 물건을 보낸 경우예요.</p>
+  <table>
+    <colgroup><col><col class="qty-col"></colgroup>
+    {% for k in range(3) %}
+      <tr><td>{{ item_select('add_item_%d' % k, entered.get('add_item_%d' % k)) }}</td>
+          <td class="num"><input class="qty" name="add_qty_{{ k }}" placeholder="수량" inputmode="decimal"
+            value="{{ entered.get('add_qty_%d' % k, '') }}"></td></tr>
+    {% endfor %}
+  </table>
+</div>
+<button class="btn block">입고 저장</button>
+</form>
+<p><a href="/sheet">고칠 것 없이 재고표로 돌아가기</a></p>
+{% endblock %}

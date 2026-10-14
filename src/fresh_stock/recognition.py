@@ -11,7 +11,7 @@ from dataclasses import dataclass, field
 from .catalog import Catalog
 from .llm import ImageInput, LLMClient
 
-UNIT_WORDS = ("박스", "box", "개", "판", "봉", "팩", "단", "모", "b")
+UNIT_WORDS = ("박스", "box", "개", "판", "봉", "팩", "단", "모", "kg", "b")
 # 손글씨 0은 영문 o나 한글 ㅇ으로 읽히기 쉽다. 수량 칸에서는 0으로 본다
 ZERO_WORDS = {"x", "X", "-", "0", "o", "O", "ㅇ", "없음", "품절"}
 KOREAN_NUMBERS = {"한": 1, "두": 2, "세": 3, "네": 4}

@@ -140,3 +140,32 @@ def test_step_guards():
         call(server, "get_order_plan")
     with pytest.raises(ToolError, match="파일이 없습니다"):
         call(server, "read_sheet", image_path="없는파일.jpg")
+
+
+def test_fix_received_tool():
+    server, _, _, day, _ = _setup()
+    arrivals = call(server, "get_arrivals")
+    assert arrivals["day"] == day.isoformat() and arrivals["lines"]
+    line = max(arrivals["lines"], key=lambda ln: ln["ordered"])
+    assert line["received"] == line["ordered"]
+
+    with pytest.raises(ToolError, match="확인받은 뒤"):
+        call(server, "fix_received", changes={line["item"]: 1}, user_confirmed=False)
+    with pytest.raises(ToolError, match="두리안"):
+        call(server, "fix_received", changes={"두리안": 1}, user_confirmed=True)
+    fixed = call(server, "fix_received", changes={line["item"]: line["ordered"] - 1}, user_confirmed=True)
+    assert fixed["fixed"] == {line["item"]: line["ordered"] - 1}
+    after = next(ln for ln in call(server, "get_arrivals")["lines"] if ln["item"] == line["item"])
+    assert after["received"] == line["ordered"] - 1
+
+
+def test_settings_changed_elsewhere_are_seen():
+    """웹 화면에서 품목을 고치면, 이미 떠 있는 MCP 서버도 다음 도구 호출부터 바뀐 목록을 쓴다."""
+    server, db, store_id, *_ = _setup()
+    assert "아보카도" not in {i["name"] for i in call(server, "list_items")["items"]}
+    other = StoreService(Store(db, store_id), CATALOG, CALENDAR)
+    other.save_item(None, name="아보카도", category="과일", unit="개", supplier_id="garak", base_demand=3, price=2500,
+                    cost=1500, shelf_life=4)  # fmt: skip
+    other.set_item_active("apple", False)
+    names = {i["name"] for i in call(server, "list_items")["items"]}
+    assert "아보카도" in names and "사과" not in names

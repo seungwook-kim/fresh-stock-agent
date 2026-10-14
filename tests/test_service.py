@@ -211,3 +211,177 @@ def test_skip_closed_day_keeps_dates_and_demand(demo, monkeypatch):
     monkeypatch.setattr("fresh_stock.service.today_kst", lambda: first - timedelta(days=1))
     with pytest.raises(ValueError, match="아직 오지 않은 날"):
         service.skip()
+
+
+# 가게 설정 ---------------------------------------------------------------------------
+
+NEW_ITEM = {"name": "아보카도", "category": "과일", "unit": "박스", "supplier_id": "garak", "base_demand": 2,
+            "price": 30000, "cost": 22000, "shelf_life": 3}  # fmt: skip
+
+
+def _to_order_step(service, day):
+    """재고표를 확정해 발주 차례까지 간다. 발주 날을 돌려준다."""
+    service.confirm_sheet(day, {0: ("tomato", 3.0)}, 0, 0)
+    while not service.calendar.is_supply_day(day + timedelta(days=1)):
+        day += timedelta(days=1)
+        service.confirm_sheet(day, {}, 0, 0)
+    assert service.status() == (ORDER, day)
+    return day
+
+
+def test_store_catalog_add_and_retire_items(demo):
+    store, first = demo
+    service = StoreService(store, catalog, calendar)
+    added = service.save_item(None, **NEW_ITEM)
+    assert added.id == "item1" and store.catalog() is not None
+    service.set_item_active("apple", False)
+    ids = {i.id for i in service.catalog.items}
+    assert "item1" in ids and "apple" not in ids
+    assert service.catalog.item("apple").name == "사과"  # 지난 기록용으로 남는다
+
+    # 다른 화면·프로세스가 만든 서비스도 같은 목록을 본다
+    assert {i.id for i in StoreService(store, catalog, calendar).catalog.items} == ids
+
+    day = _to_order_step(service, first)
+    plan = service.plan_for(day)
+    lines = {ln.item_id: ln for ln in plan.lines}
+    assert set(lines) == ids
+    # 판매 기록이 없는 새 품목은 기본 수요로 추천한다 (지난 날들을 판매 0으로 보지 않는다)
+    cover = len(service.calendar.cover_days(plan.arrival))
+    assert lines["item1"].recommended >= math.ceil(2 * cover)
+    assert service.revenue(days=3)  # 사과 기록이 남은 장부도 계산된다
+    service.approve(day, {i: ln.recommended for i, ln in lines.items()})
+    garak = next(m for m in service.messages(day) if m.supplier.id == "garak")
+    assert "- 아보카도 " in garak.text and "- 사과 " not in garak.text
+
+    service.set_item_active("apple", True)
+    assert service.catalog.items[-1].id == "apple"
+
+
+def test_item_and_supplier_validation(demo):
+    store, _ = demo
+    service = StoreService(store, catalog, calendar)
+    with pytest.raises(ValueError, match="이미 있는 품목"):
+        service.save_item(None, **{**NEW_ITEM, "name": "사과"})
+    with pytest.raises(ValueError, match="단위"):
+        service.save_item(None, **{**NEW_ITEM, "unit": "상자"})
+    with pytest.raises(ValueError, match="1~30일"):
+        service.save_item(None, **{**NEW_ITEM, "shelf_life": 0})
+    with pytest.raises(ValueError, match="거래처"):
+        service.save_item(None, **{**NEW_ITEM, "supplier_id": "nope"})
+    assert store.catalog() is None  # 실패하면 아무것도 저장하지 않는다
+
+    service.set_item_active("apple", False)
+    with pytest.raises(ValueError, match="다시 취급"):
+        service.save_item(None, **{**NEW_ITEM, "name": "사과"})
+    edited = service.save_item("tomato", **{**NEW_ITEM, "name": "토마토", "price": 25000})
+    assert service.catalog.item("tomato").price == 25000 and edited.id == "tomato"
+
+    with pytest.raises(ValueError, match="지울 수 없습니다"):
+        service.delete_supplier("garak")
+    fish = service.save_supplier(None, name="생선 거래처", channel="전화")
+    with pytest.raises(ValueError, match="이미 있는 거래처"):
+        service.save_supplier(None, name="생선 거래처", channel="문자")
+    with pytest.raises(ValueError, match="주문 방식"):
+        service.save_supplier(fish.id, name="생선 거래처", channel="팩스")
+    service.save_supplier(fish.id, name="수산 거래처", channel="문자")
+    assert service.catalog.supplier(fish.id).name == "수산 거래처"
+    service.delete_supplier(fish.id)
+    assert fish.id not in {s.id for s in service.catalog.suppliers}
+
+
+def test_editing_items_remakes_pending_plan(demo):
+    store, first = demo
+    service = StoreService(store, catalog, calendar)
+    day = _to_order_step(service, first)
+    service.plan_for(day)
+    service.save_item("tomato", **{**NEW_ITEM, "name": "토마토"})  # 품목 구성은 그대로: 추천도 그대로
+    assert store.plan(day) is not None
+    service.save_item(None, **NEW_ITEM)  # 품목이 늘면 승인 전 추천을 지우고 다시 만든다
+    assert store.plan(day) is None
+    assert "item1" in {ln.item_id for ln in service.plan_for(day).lines}
+
+
+class RecordingLLM(FakeLLM):
+    """시스템 프롬프트까지 남긴다."""
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.systems = []
+
+    def generate_json(self, system, prompt, schema, purpose="", images=()):
+        self.systems.append(system)
+        return super().generate_json(system, prompt, schema, purpose, images)
+
+
+def test_calendar_and_knowledge_settings(demo):
+    store, first = demo
+    llm = RecordingLLM()
+    service = StoreService(store, catalog, calendar, llm_factory=lambda: llm)
+    service.save_calendar((1, 6), (6,))
+    assert service.calendar.market_day_digits == (1, 6)
+    assert StoreService(store, catalog, calendar).calendar.market_day_digits == (1, 6)
+    with pytest.raises(ValueError, match="하루는"):
+        service.save_calendar((), tuple(range(7)))
+
+    # 다음 날을 입고 없는 날로 바꾸면 발주 없이 다음 날 재고표로 간다
+    service.confirm_sheet(first, {0: ("tomato", 3.0)}, 0, 0)
+    service.save_calendar((1, 6), ((first + timedelta(days=1)).weekday(),))
+    assert service.status() == (SHEET, first + timedelta(days=1))
+    service.save_calendar((1, 6), ())
+    assert service.status() == (ORDER, first)
+
+    service.save_knowledge("  우리 동네는 비 오면 오히려 손님이 늘어요.  ")
+    assert service.knowledge == "우리 동네는 비 오면 오히려 손님이 늘어요."
+    assert service.order_context(first).notes  # 데모의 TV 방송 메모가 있어 에이전트를 부른다
+    service.plan_for(first)
+    assert "비 오면 오히려 손님이 늘어요" in llm.systems[-1]
+    with pytest.raises(ValueError, match="까지"):
+        service.save_knowledge("가" * 5000)
+
+
+def test_fix_received_changes_sales(demo):
+    store, day = demo
+    service = StoreService(store, catalog, calendar)
+    ordered, received = service.arrivals(day)
+    assert ordered and ordered == received  # 승인한 수량이 그대로 입고로 기록돼 있다
+    item = max(ordered, key=ordered.get)
+    extra = next(i.id for i in catalog.items if i.id not in ordered)
+    before, _ = service.sheet_bounds(day)
+
+    got = service.fix_received(day, {item: ordered[item] - 1, extra: 2})
+    assert got[item] == ordered[item] - 1 and got[extra] == 2
+    after, _ = service.sheet_bounds(day)
+    assert after[item] == before[item] - 1 and after[extra] == before[extra] + 2
+    assert extra not in service.fix_received(day, {extra: 0})  # 0이면 입고 없음
+
+    for bad in ({item: -1}, {"nope": 1}, {item: float("nan")}):
+        with pytest.raises(ValueError):
+            service.fix_received(day, bad)
+
+    # 판매량 계산(어제 재고 + 입고 - 오늘 재고)에 고친 입고가 들어간다
+    service.confirm_sheet(day, {0: (item, 0.0)}, 0, 0)
+    ledger = store.ledger()
+    assert ledger[-1].day == day and ledger[-1].received[item] == ordered[item] - 1
+    with pytest.raises(ValueError, match="확정하기 전"):
+        service.fix_received(day, {item: 1})
+
+
+def test_import_catalog_keeps_dropped_items(tmp_path, demo):
+    from fresh_stock.catalog import catalog_csv
+
+    store, _ = demo
+    service = StoreService(store, catalog, calendar)
+    items_csv, suppliers_csv = catalog_csv(catalog)
+    lines = [ln for ln in items_csv.splitlines() if not ln.startswith("apple,")]
+    lines.append("avocado,아보카도,과일,박스,garak,2,30000,22000,3,1")
+    (tmp_path / "items.csv").write_text("\n".join(lines), encoding="utf-8-sig")
+    (tmp_path / "suppliers.csv").write_text(suppliers_csv, encoding="utf-8")
+    merged = service.import_catalog(load_catalog(tmp_path / "items.csv", tmp_path / "suppliers.csv"))
+    assert "avocado" in {i.id for i in merged.items} and [i.id for i in merged.retired] == ["apple"]
+    assert service.catalog == merged
+
+    bad = tmp_path / "bad.csv"
+    bad.write_text(items_csv.replace("apple,사과,과일,박스", "apple,사과,과일,상자"), encoding="utf-8")
+    with pytest.raises(ValueError, match="단위 상자"):
+        service.import_catalog(load_catalog(bad, tmp_path / "suppliers.csv"))

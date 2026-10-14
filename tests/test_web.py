@@ -3,7 +3,7 @@
 import json
 from datetime import timedelta
 
-from conftest import WebEnv
+from conftest import CATALOG, WebEnv
 
 from fresh_stock.llm import LLMError
 
@@ -146,3 +146,76 @@ def test_skip_banner_when_behind():
     assert "쉬는 날로 건너뛰기" in page.text  # 데모 기록은 7월에 끝나 오늘보다 앞선다
     env.client.post("/skip")
     assert env.store.last_closed_day() == env.first
+
+
+NEW_ITEM_FORM = {"name": "아보카도", "category": "과일", "unit": "개", "supplier_id": "garak", "base_demand": "3",
+                 "price": "2,500", "cost": "1500", "shelf_life": "4"}  # fmt: skip
+
+
+def test_owner_edits_items_and_store_settings():
+    env = WebEnv(FakeLLM())
+    env.login()
+    c = env.client
+    page = c.get("/settings").text
+    assert "기본 품목 목록" in page and "사과" in page and "가락시장" in page
+
+    r = c.post("/settings/item", data=NEW_ITEM_FORM, follow_redirects=True)
+    assert "아보카도 저장했어요" in r.text and "기본 품목 목록" not in r.text
+    assert env.store.catalog().item("item1").price == 2500
+    r = c.post("/settings/item", data={**NEW_ITEM_FORM, "name": "망고", "price": "비쌈"})
+    assert "판매가에 숫자를 적어 주세요" in r.text and 'value="망고"' in r.text  # 입력한 값은 그대로 남는다
+    r = c.post("/settings/item", data={**NEW_ITEM_FORM, "item_id": "item1", "price": "3000"}, follow_redirects=True)
+    assert env.store.catalog().item("item1").price == 3000
+
+    assert 'value="사과"' in c.get("/settings/item?item_id=apple").text
+    r = c.post("/settings/item/apple/active", data={"active": "0"}, follow_redirects=True)
+    assert "사과: 취급을 그만뒀어요" in r.text and "취급을 그만둔 품목 1개" in r.text
+    review = c.post("/sheet", files={"photo": ("sheet.jpg", b"x", "image/jpeg")}, follow_redirects=True).text
+    assert 'value="apple"' not in review and 'value="item1"' in review  # 재고표 품목 선택에서도 빠진다
+
+    r = c.post("/settings/supplier", data={"name": "과일 도매", "channel": "전화"}, follow_redirects=True)
+    assert "과일 도매 저장했어요" in r.text
+    r = c.post("/settings/supplier/garak/delete", follow_redirects=True)
+    assert "지울 수 없습니다" in r.text
+
+    r = c.post("/settings/calendar", data={"market": "1,6", "closed": ["0", "6"]}, follow_redirects=True)
+    assert "장날·입고 요일을 저장했어요" in r.text and '<option value="1,6" selected>' in r.text
+    assert env.store.settings()["closed_weekdays"] == "0,6"
+    r = c.post("/settings/calendar", data={"market": "9,9"}, follow_redirects=True)
+    assert "잘못됐습니다" in r.text
+    r = c.post("/settings/knowledge", data={"text": "비 오면 배달 주문이 늘어요"}, follow_redirects=True)
+    assert "경험 노트를 저장했어요" in r.text and "비 오면 배달 주문이 늘어요" in r.text
+
+
+def test_staff_sees_settings_but_cannot_change():
+    env = WebEnv(FakeLLM())
+    env.db.add_member(env.store_id, "staff@gmail.com")
+    env.login("staff@gmail.com")
+    c = env.client
+    page = c.get("/settings").text
+    assert "사장님만 고칠 수 있어요" in page and "고치기</a>" not in page
+    for url, data in [("/settings/item", NEW_ITEM_FORM), ("/settings/calendar", {"market": ""}),
+                      ("/settings/knowledge", {"text": "x"}), ("/settings/item/apple/active", {"active": "0"})]:  # fmt: skip
+        r = c.post(url, data=data, follow_redirects=True)
+        assert "사장님만 고칠 수 있습니다" in r.text
+    assert env.store.catalog() is None and env.store.settings() == {}
+
+
+def test_received_page_fixes_arrivals():
+    env = WebEnv(FakeLLM())
+    env.login()
+    c, day = env.client, env.first
+    assert "입고 확인·수정" in c.get("/sheet").text
+    ordered = env.store.received(day)  # 승인한 발주가 그대로 입고로 기록돼 있다
+    item = max(ordered, key=ordered.get)
+    extra = next(i.id for i in CATALOG.items if i.id not in ordered)
+    assert f'name="recv_{item}"' in c.get("/received").text
+
+    r = c.post("/received", data={f"recv_{item}": "1반", "add_item_0": extra, "add_qty_0": "2"}, follow_redirects=True)
+    assert "입고를 저장했어요" in r.text and "주문과 다른 품목 2개" in r.text
+    got = env.store.received(day)
+    assert got[item] == 1.5 and got[extra] == 2.0
+
+    r = c.post("/received", data={f"recv_{item}": "많이"})
+    assert "수량을 알 수 없습니다" in r.text and 'value="많이"' in r.text
+    assert env.store.received(day)[item] == 1.5

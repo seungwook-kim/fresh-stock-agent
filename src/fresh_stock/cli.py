@@ -6,6 +6,8 @@
     fresh-stock messages --date 2026-09-21 --llm
     fresh-stock eval-sheets --n 10
     fresh-stock serve --demo
+    fresh-stock export-catalog --store 1 --out out/catalog
+    fresh-stock import-catalog --store 1 items.csv suppliers.csv
 """
 
 import argparse
@@ -299,9 +301,43 @@ def _copy_db(args: argparse.Namespace) -> None:
     counts = target.load(source.dump())
     print(f"{mask_url(args.source)} -> {mask_url(args.target)}")
     for table, n in counts.items():
-        print(f"  {table:<12} {n:>6}행")
+        print(f"  {table:<16} {n:>6}행")
     source.close()
     target.close()
+
+
+def _catalog_service(db_url: str, store_id: int):
+    from .service import StoreService
+    from .store import Database, Store
+
+    db = Database(db_url)
+    if db.store_name(store_id) is None:
+        ids = ", ".join(f"{i}: {db.store_name(i)}" for i in db.store_ids()) or "없음"
+        raise SystemExit(f"가게 {store_id}이(가) 없습니다. 가게 목록: {ids}")
+    return StoreService(Store(db, store_id), load_catalog(), MarketCalendar(), store_name=db.store_name(store_id))
+
+
+def _export_catalog(args: argparse.Namespace) -> None:
+    from .catalog import catalog_csv
+
+    service = _catalog_service(args.db, args.store)
+    items, suppliers = catalog_csv(service.catalog)
+    args.out.mkdir(parents=True, exist_ok=True)
+    # 엑셀에서 바로 열리도록 BOM을 붙인다
+    (args.out / "items.csv").write_text(items, encoding="utf-8-sig")
+    (args.out / "suppliers.csv").write_text(suppliers, encoding="utf-8-sig")
+    print(f"품목 {len(service.catalog.items)}개(취급 그만둔 품목 {len(service.catalog.retired)}개 별도), "
+          f"거래처 {len(service.catalog.suppliers)}곳 -> {args.out.resolve()}")
+
+
+def _import_catalog(args: argparse.Namespace) -> None:
+    service = _catalog_service(args.db, args.store)
+    try:
+        merged = service.import_catalog(load_catalog(args.items, args.suppliers))
+    except (ValueError, KeyError) as e:
+        raise SystemExit(f"목록을 바꾸지 않았습니다: {e}") from e
+    print(f"[{service.store_name}] 품목 {len(merged.items)}개, 거래처 {len(merged.suppliers)}곳으로 바꿨습니다."
+          f" 취급을 그만둔 품목 {len(merged.retired)}개는 지난 기록용으로 남깁니다.")
 
 
 def _won(v: int) -> str:
@@ -441,6 +477,21 @@ def main() -> None:
     fn.add_argument("--day", type=date.fromisoformat, default=None, help="기준일 (기본: 오늘)")
     fn.add_argument("--days", type=int, default=3, help="기준일 다음 날부터 며칠치")
 
+    ex = sub.add_parser(
+        "export-catalog", help="가게 품목·거래처 목록을 CSV로 뽑는다 (엑셀에서 고쳐 import-catalog로 넣는다)"
+    )
+    ex.add_argument("--db", default=os.environ.get("FRESH_STOCK_DB", "out/store.db"))
+    ex.add_argument("--store", type=int, required=True, help="가게 번호")
+    ex.add_argument("--out", type=Path, default=Path("out/catalog"))
+
+    im = sub.add_parser(
+        "import-catalog", help="CSV로 가게 품목·거래처 목록을 통째로 바꾼다. 빠진 품목은 취급 그만둔 품목으로 남긴다"
+    )
+    im.add_argument("--db", default=os.environ.get("FRESH_STOCK_DB", "out/store.db"))
+    im.add_argument("--store", type=int, required=True, help="가게 번호")
+    im.add_argument("items", type=Path, help="품목 CSV (export-catalog의 items.csv 형식)")
+    im.add_argument("suppliers", type=Path, help="거래처 CSV (export-catalog의 suppliers.csv 형식)")
+
     cp = sub.add_parser("copy-db", help="저장소 데이터를 다른 DB로 옮긴다 (예: SQLite -> Supabase)")
     cp.add_argument("source", help="옮길 DB (SQLite 파일 경로 또는 postgresql:// 주소)")
     cp.add_argument("target", help="받을 빈 DB")
@@ -452,6 +503,10 @@ def main() -> None:
         _fetch_notes(args)
     elif args.command == "copy-db":
         _copy_db(args)
+    elif args.command == "export-catalog":
+        _export_catalog(args)
+    elif args.command == "import-catalog":
+        _import_catalog(args)
     elif args.command == "eval-retrieval":
         _eval_retrieval(args)
     elif args.command == "serve":

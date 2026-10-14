@@ -1,0 +1,94 @@
+{% extends "base.html" %}
+{% set active = "settings" %}
+{% set owner = role == 'owner' %}
+{% block title %}품목·설정{% endblock %}
+{% block content %}
+<h1>품목·설정</h1>
+{% if error %}<div class="alert">{{ error }}</div>{% endif %}
+{% if saved %}<div class="note">{{ saved }}</div>{% endif %}
+{% if not owner %}<p class="muted">가게 설정은 사장님만 고칠 수 있어요. 여기서는 볼 수만 있어요.</p>{% endif %}
+
+<h2>품목</h2>
+{% if not customized %}
+  <div class="note">지금은 기본 품목 목록(가상 매장 값)을 쓰고 있어요. 하나라도 고치면 이 가게 목록으로 저장되고, 그다음부터 이 가게만의 목록이 돼요.</div>
+{% endif %}
+{% if owner %}<p><a class="btn small" href="/settings/item">품목 추가</a></p>{% endif %}
+{% for supplier, items in groups if items %}
+<details class="card" style="padding:8px">
+  <summary style="padding:4px 6px"><b>{{ supplier.name }}</b> <span class="muted">· {{ supplier.channel }} · {{ items | length }}개</span></summary>
+  <table>
+    <colgroup><col><col style="width:6.5em"><col style="width:3.6em"></colgroup>
+    {% for i in items %}
+      <tr><td>{{ i.name }} <span class="muted">{{ i.unit }} · {{ i.category }}</span></td>
+          <td class="num">{{ i.price | won }}</td>
+          <td class="num">{% if owner %}<a href="/settings/item?item_id={{ i.id }}">고치기</a>{% endif %}</td></tr>
+    {% endfor %}
+  </table>
+</details>
+{% endfor %}
+{% if retired %}
+<details class="card"><summary>취급을 그만둔 품목 {{ retired | length }}개</summary>
+  {% for i in retired %}
+    <div class="row" style="justify-content:space-between; border-bottom:1px solid var(--line); padding:6px 0">
+      <span>{{ i.name }} <span class="muted">{{ i.unit }}</span></span>
+      {% if owner %}
+        <form method="post" action="/settings/item/{{ i.id }}/active"><input type="hidden" name="active" value="1">
+          <button class="btn small secondary">다시 취급</button></form>
+      {% endif %}
+    </div>
+  {% endfor %}
+</details>
+{% endif %}
+
+<h2>거래처</h2>
+<div class="card">
+  {% for supplier in catalog.suppliers %}
+    <div class="row" style="border-bottom:1px solid var(--line); padding:6px 0">
+      {% if owner %}
+        <form method="post" action="/settings/supplier" class="row" style="flex:1">
+          <input type="hidden" name="supplier_id" value="{{ supplier.id }}">
+          <input name="name" value="{{ supplier.name }}" required style="flex:1; min-width:140px">
+          <select name="channel">{% for c in channels %}<option {{ 'selected' if c == supplier.channel }}>{{ c }}</option>{% endfor %}</select>
+          <button class="btn small secondary">저장</button>
+        </form>
+        <form method="post" action="/settings/supplier/{{ supplier.id }}/delete"><button class="btn small secondary">지우기</button></form>
+      {% else %}
+        <span>{{ supplier.name }} <span class="muted">· {{ supplier.channel }}</span></span>
+      {% endif %}
+    </div>
+  {% endfor %}
+  {% if owner %}
+    <form method="post" action="/settings/supplier" class="row" style="margin-top:10px">
+      <input name="name" placeholder="새 거래처 이름" required style="flex:1; min-width:140px">
+      <select name="channel">{% for c in channels %}<option>{{ c }}</option>{% endfor %}</select>
+      <button class="btn small">추가</button>
+    </form>
+  {% endif %}
+  <p class="muted" style="margin-bottom:0">주문 방식에 따라 거래처 문자가 달라져요. 구매목록: 직접 사 오는 곳(가락시장 등)에 들고 갈 분류별 목록,
+    문자: 한 줄 주문 문자, 전화: 통화하면서 읽을 메모. 품목이 남아 있는 거래처는 지울 수 없어요.</p>
+</div>
+
+<h2>장날·입고 요일</h2>
+<form method="post" action="/settings/calendar" class="card">
+  <label>5일장 <select name="market" {{ 'disabled' if not owner }}>
+    {% for value, label in market_choices %}<option value="{{ value }}" {{ 'selected' if value == market_value }}>{{ label }}</option>{% endfor %}
+  </select></label>
+  <div style="margin-top:10px">입고가 없는 요일 <span class="muted">(시장·거래처가 쉬는 날)</span></div>
+  <div class="row" style="margin-top:4px">
+    {% for w in weekdays %}
+      <label><input type="checkbox" name="closed" value="{{ loop.index0 }}" {{ 'checked' if loop.index0 in closed }} {{ 'disabled' if not owner }}> {{ w }}</label>
+    {% endfor %}
+  </div>
+  <p class="muted">장날은 기록이 쌓이기 전까지 평소의 1.5배로 보고, 기록이 생기면 실제 장날 판매로 계산해요.
+    입고가 없는 요일은 그 전날 들어오는 물건으로 버티도록 발주를 추천해요 (일요일에 쉬면 토요일에 이틀 치).</p>
+  {% if owner %}<button class="btn small">저장</button>{% endif %}
+</form>
+
+<h2>사장님 경험 노트</h2>
+<form method="post" action="/settings/knowledge" class="card">
+  <p class="muted" style="margin-top:0">가게 메모(날씨·명절·TV 방송)가 있을 때 발주 AI가 "평소의 몇 배"를 판단하며 참고하는 경험이에요.
+    예: 장날은 평소의 1.5배, 비 오면 손님이 줄어요. 비워 두면 경험 노트 없이 판단해요.</p>
+  <textarea name="text" rows="10" style="width:100%" {{ 'readonly' if not owner }}>{{ knowledge }}</textarea>
+  {% if owner %}<button class="btn small" style="margin-top:8px">저장</button>{% endif %}
+</form>
+{% endblock %}

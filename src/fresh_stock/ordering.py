@@ -16,6 +16,7 @@ from .domain import Item
 from .market_calendar import MarketCalendar
 
 SOLD_OUT_BUMP = 1.3  # 마감 때 다 팔렸으면 수요를 이만큼 더 있었다고 본다
+GAP_DAYS = 7  # 품목이 이보다 오래 하나도 없었으면 취급하지 않은 기간으로 보고 수요 기록에서 뺀다
 
 
 @dataclass(frozen=True)
@@ -41,12 +42,23 @@ class OrderContext:
 
         아무것도 팔리지 않은 날은 뺀다. 가게를 쉰 날이거나, 전날 재고를 모르는 첫 기록(처음 쓰기 시작한 날)이라
         수요가 0이었던 게 아니다. 넣으면 요일 중앙값이 0으로 끌려 내려가 발주가 0이 된다.
+
+        품목이 처음 들어오기 전의 날과, 그 품목이 GAP_DAYS일 넘게 계속 하나도 없던 날(어제 재고 + 오늘 입고 = 0)도
+        같은 이유로 뺀다. 새로 들인 품목이거나 한동안 취급하지 않았던 기간이다. 넣으면 새 품목의 추천이 계속 0이라
+        한 번도 들어오지 않는다. 하루이틀 없던 날(토요일에 다 팔려 일요일에 없던 날 등)은 그대로 둔다.
         """
-        return [
-            (rec.day, sold.get(item_id, 0.0) * (SOLD_OUT_BUMP if rec.closing.get(item_id, 0.0) == 0 else 1.0))
-            for rec, sold in zip(self.ledger, self._sales)
-            if any(q > 0 for q in sold.values())
-        ]
+        history = []
+        prev_closing, seen, empty_days = 0.0, False, 0
+        for rec, sold in zip(self.ledger, self._sales):
+            available = prev_closing + rec.received.get(item_id, 0.0) > 0
+            seen = seen or available
+            empty_days = 0 if available else empty_days + 1
+            prev_closing = rec.closing.get(item_id, 0.0)
+            if not seen or empty_days > GAP_DAYS or not any(q > 0 for q in sold.values()):
+                continue
+            bump = SOLD_OUT_BUMP if rec.closing.get(item_id, 0.0) == 0 else 1.0
+            history.append((rec.day, sold.get(item_id, 0.0) * bump))
+        return history
 
 
 class OrderPolicy(Protocol):

@@ -3,7 +3,8 @@
 - Database: DB 연결, 스키마, 가게와 가게 멤버(구글 계정 이메일)
 - Store: 가게 하나의 데이터. 모든 조회·저장이 그 가게(store_id)로 한정된다
 
-하루 기록(입고·마감 재고·현금·카드), 가게 메모와 메모 조사 결과, 발주, 재고표 인식 결과를 저장한다.
+하루 기록(입고·마감 재고·현금·카드), 가게 메모와 메모 조사 결과, 발주, 재고표 인식 결과,
+가게 설정(품목·거래처, 장날·입고 요일, 경험 노트)을 저장한다.
 재고표 인식 결과는 모델이 읽은 값과 사람이 확정한 값을 함께 남긴다. 실제 매장에서 쓰기 시작하면
 이 기록이 그대로 실제 손글씨 인식률 평가 데이터가 된다.
 
@@ -26,6 +27,8 @@ from pathlib import Path
 from typing import Any
 
 from .accounting import DayRecord
+from .catalog import Catalog
+from .domain import Category, Item, Supplier
 from .market_calendar import now_kst
 
 SCHEMA_VERSION = "2"
@@ -98,6 +101,22 @@ CREATE TABLE IF NOT EXISTS sheet_row (
     item_id_read TEXT, qty_read DOUBLE PRECISION, flags TEXT NOT NULL,
     item_id_final TEXT, qty_final DOUBLE PRECISION,
     PRIMARY KEY (store_id, day, idx)
+);
+CREATE TABLE IF NOT EXISTS catalog_supplier (
+    store_id INTEGER NOT NULL, id TEXT NOT NULL, pos INTEGER NOT NULL,
+    name TEXT NOT NULL, channel TEXT NOT NULL,
+    PRIMARY KEY (store_id, id)
+);
+CREATE TABLE IF NOT EXISTS catalog_item (
+    store_id INTEGER NOT NULL, id TEXT NOT NULL, pos INTEGER NOT NULL,
+    name TEXT NOT NULL, category TEXT NOT NULL, unit TEXT NOT NULL, supplier_id TEXT NOT NULL,
+    base_demand DOUBLE PRECISION NOT NULL, price INTEGER NOT NULL, cost INTEGER NOT NULL, shelf_life INTEGER NOT NULL,
+    active INTEGER NOT NULL,  -- 0: 취급을 그만둔 품목 (지난 기록용으로 남긴다)
+    PRIMARY KEY (store_id, id)
+);
+CREATE TABLE IF NOT EXISTS store_setting (
+    store_id INTEGER NOT NULL, key TEXT NOT NULL, value TEXT NOT NULL,
+    PRIMARY KEY (store_id, key)
 )
 """
 DIALECT_TYPES = {
@@ -120,6 +139,12 @@ TABLES = {
         "store_id", "day", "idx", "raw_name", "raw_qty", "item_id_read", "qty_read", "flags", "item_id_final",
         "qty_final",
     ),
+    "catalog_supplier": ("store_id", "id", "pos", "name", "channel"),
+    "catalog_item": (
+        "store_id", "id", "pos", "name", "category", "unit", "supplier_id", "base_demand", "price", "cost",
+        "shelf_life", "active",
+    ),
+    "store_setting": ("store_id", "key", "value"),
 }  # fmt: skip
 SERIAL_TABLES = ("stores", "note")  # 옮긴 뒤 다음 id를 맞춰야 하는 테이블
 OWNER, STAFF = "owner", "staff"
@@ -564,6 +589,15 @@ class Store:
             order_day, date.fromisoformat(row[0]), row[1], bool(row[2]), tuple(OrderLineRecord(*ln) for ln in lines)
         )
 
+    def delete_unapproved_plan(self, order_day: date) -> None:
+        """승인 전 발주 추천을 지운다 (다음에 열 때 새로 만든다). 승인한 발주는 그대로 둔다."""
+        s, d = self.store_id, order_day.isoformat()
+        with self._tx() as tx:
+            if tx.one("SELECT approved FROM order_plan WHERE store_id = ? AND order_day = ?", (s, d)) != (0,):
+                return
+            tx.execute("DELETE FROM order_line WHERE store_id = ? AND order_day = ?", (s, d))
+            tx.execute("DELETE FROM order_plan WHERE store_id = ? AND order_day = ?", (s, d))
+
     def approved_finals(self, item_id: str, limit: int = 10) -> list[tuple[date, int]]:
         """승인된 지난 발주 (입고일, 수량). 추천 없이 넣는 발주의 가드레일에 쓴다."""
         with self._tx() as tx:
@@ -655,3 +689,56 @@ class Store:
                 (self.store_id,),
             )
         return {"확정한 줄": total or 0, "사람이 고친 줄": n_changed or 0, "그중 확인 표시가 있던 줄": n_flagged or 0}
+
+    # 가게 설정 ------------------------------------------------------------------
+
+    def catalog(self) -> Catalog | None:
+        """이 가게의 품목·거래처. 아직 고친 적이 없으면 None이고, 그동안은 기본 목록을 쓴다."""
+        s = (self.store_id,)
+        with self._tx() as tx:
+            suppliers = tx.all("SELECT id, name, channel FROM catalog_supplier WHERE store_id = ? ORDER BY pos", s)
+            rows = tx.all(
+                "SELECT id, name, category, unit, supplier_id, base_demand, price, cost, shelf_life, active"
+                " FROM catalog_item WHERE store_id = ? ORDER BY pos",
+                s,
+            )
+        if not rows:
+            return None
+        items, retired = [], []
+        for iid, name, category, unit, supplier_id, demand, price, cost, shelf_life, active in rows:
+            item = Item(iid, name, Category(category), unit, supplier_id, float(demand), price, cost, shelf_life)
+            (items if active else retired).append(item)
+        return Catalog(tuple(items), tuple(Supplier(*r) for r in suppliers), tuple(retired))
+
+    def save_catalog(self, catalog: Catalog) -> None:
+        """품목·거래처 목록을 통째로 바꾼다 (100줄 안팎이라 고친 것만 골라 쓰지 않는다)."""
+        s = self.store_id
+        with self._tx() as tx:
+            tx.execute("DELETE FROM catalog_supplier WHERE store_id = ?", (s,))
+            tx.execute("DELETE FROM catalog_item WHERE store_id = ?", (s,))
+            tx.executemany(
+                "INSERT INTO catalog_supplier (store_id, id, pos, name, channel) VALUES (?, ?, ?, ?, ?)",
+                [(s, sup.id, n, sup.name, sup.channel) for n, sup in enumerate(catalog.suppliers)],
+            )
+            rows = [
+                (s, i.id, n, i.name, i.category.value, i.unit, i.supplier_id, i.base_demand, i.price, i.cost,
+                 i.shelf_life, int(n < len(catalog.items)))
+                for n, i in enumerate(catalog.all_items)
+            ]  # fmt: skip
+            tx.executemany(
+                "INSERT INTO catalog_item (store_id, id, pos, name, category, unit, supplier_id, base_demand, price,"
+                " cost, shelf_life, active) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                rows,
+            )
+
+    def settings(self) -> dict[str, str]:
+        with self._tx() as tx:
+            return dict(tx.all("SELECT key, value FROM store_setting WHERE store_id = ?", (self.store_id,)))
+
+    def save_setting(self, key: str, value: str) -> None:
+        with self._tx() as tx:
+            tx.execute(
+                "INSERT INTO store_setting (store_id, key, value) VALUES (?, ?, ?)"
+                " ON CONFLICT (store_id, key) DO UPDATE SET value = excluded.value",
+                (self.store_id, key, value),
+            )

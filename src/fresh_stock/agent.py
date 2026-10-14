@@ -31,7 +31,7 @@ FACTOR_RANGE = (0.2, 4.0)  # 판단이 틀려도 피해가 한정되게 배율�
 STORE_KNOWLEDGE = resources.files("fresh_stock").joinpath("data", "store_knowledge.md").read_text(encoding="utf-8")
 
 
-def build_system_prompt(use_knowledge: bool = True, use_memory: bool = False) -> str:
+def build_system_prompt(use_knowledge: bool = True, use_memory: bool = False, knowledge: str = STORE_KNOWLEDGE) -> str:
     sources = []
     if use_memory:
         sources.append("과거 비슷한 날의 실제 결과 (기록에서 검색, 프롬프트의 [과거 비슷한 날])")
@@ -67,7 +67,7 @@ def build_system_prompt(use_knowledge: bool = True, use_memory: bool = False) ->
         "- summary는 이번 발주에 대해 사장님께 드리는 한두 문장 요약이다.",
     ]
     if use_knowledge:
-        lines += ["", "아래는 사장님이 직접 알려준 매장 경험이다.", "", STORE_KNOWLEDGE]
+        lines += ["", "아래는 사장님이 직접 알려준 매장 경험이다.", "", knowledge]
     return "\n".join(lines)
 
 
@@ -136,6 +136,7 @@ class AgentPolicy:
         use_knowledge: bool = True,
         max_lookups: int = 2,
         skip_quiet_days: bool = True,
+        knowledge: str = STORE_KNOWLEDGE,  # 가게 설정에서 사장님이 고친 경험 노트
     ):
         self.llm = llm
         self.memory = memory
@@ -143,7 +144,7 @@ class AgentPolicy:
         self.max_lookups = max_lookups
         # 메모가 없는 날은 규칙이 이미 평소 패턴을 반영하므로 LLM을 부르지 않는다 (비용·지연 절감)
         self.skip_quiet_days = skip_quiet_days
-        self.system_prompt = build_system_prompt(use_knowledge, memory is not None)
+        self.system_prompt = build_system_prompt(use_knowledge, memory is not None, knowledge)
         self.label = "발주 에이전트" + (" + 과거 기록 검색" if memory else "") + ("" if use_knowledge else " (경험 노트 없음)")
         self.base_policy = SeasonalPolicy()
         self.decisions: list[AgentDecision] = []

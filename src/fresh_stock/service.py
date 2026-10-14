@@ -1,8 +1,12 @@
 """매장 하루 업무 흐름. 웹 화면과 무관한 업무 로직이다.
 
-마감 재고표 사진 → 확인·수정 → 발주 추천 → 승인 → 거래처 문자
+(입고 확인) → 마감 재고표 사진 → 확인·수정 → 발주 추천 → 승인 → 거래처 문자
+
+가게 설정(품목·거래처, 장날·입고 요일, 경험 노트)도 여기서 고친다. 가게마다 DB에 저장되고,
+고치기 전까지는 기본값(가상 매장 목록, 2·7일 장, 일요일 입고 없음, 기본 경험 노트)을 쓴다.
 """
 
+import math
 import threading
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
@@ -11,9 +15,10 @@ from datetime import date, timedelta
 from statistics import mean
 
 from .accounting import clearance_estimate, regular_sales_series
-from .agent import AgentPolicy
+from .agent import STORE_KNOWLEDGE, AgentPolicy
 from .auto_notes import HEAT_PREFIX, RAIN_PREFIX, AutoNote, WeatherSource, collect
 from .catalog import Catalog
+from .domain import CHANNELS, UNITS, Category, Item, Supplier
 from .llm import ImageInput, LLMClient, LLMError
 from .market_calendar import MarketCalendar, today_kst
 from .memory import DayMemoryBank
@@ -25,6 +30,30 @@ from .simulator import MARKDOWN_RATE
 from .store import OWNER_NOTE, Note, OrderLineRecord, OrderPlan, Research, SheetRowRecord, Store
 
 SHEET, ORDER = "sheet", "order"
+# 가게 설정 키 (store_setting)
+MARKET_DAYS, CLOSED_WEEKDAYS, KNOWLEDGE = "market_days", "closed_weekdays", "knowledge"
+MAX_KNOWLEDGE_LEN = 4000  # 경험 노트는 발주 에이전트 프롬프트에 그대로 들어간다
+
+
+def _ints(text: str) -> tuple[int, ...]:
+    return tuple(int(x) for x in text.split(",") if x.strip())
+
+
+def calendar_from_settings(settings: dict[str, str], default: MarketCalendar) -> MarketCalendar:
+    """가게 설정의 장날(날짜 끝자리)·입고 없는 요일. 정하지 않은 것은 default를 쓴다."""
+    return MarketCalendar(
+        market_day_digits=_ints(settings[MARKET_DAYS]) if MARKET_DAYS in settings else default.market_day_digits,
+        no_supply_weekdays=(
+            _ints(settings[CLOSED_WEEKDAYS]) if CLOSED_WEEKDAYS in settings else default.no_supply_weekdays
+        ),
+    )
+
+
+def _new_id(prefix: str, taken: set[str]) -> str:
+    n = 1
+    while f"{prefix}{n}" in taken:
+        n += 1
+    return f"{prefix}{n}"
 
 
 @dataclass(frozen=True)
@@ -52,8 +81,8 @@ class StoreService:
         research_llm_factory: Callable[[], LLMClient] | None = None,
     ):
         self.store = store
-        self.catalog = catalog
-        self.calendar = calendar
+        self.default_catalog = catalog
+        self.default_calendar = calendar
         self.llm_factory = llm_factory
         self.store_name = store_name
         self.memory = memory  # 과거 비슷한 날 검색 (RAG). 없으면 경험 노트만 쓴다
@@ -62,6 +91,16 @@ class StoreService:
         self.research_llm_factory = research_llm_factory  # 웹 검색이 되는 LLM (사장님 메모 확인)
         # 발주 추천은 1~3분 걸린다. 새로고침·두 사람이 동시에 열어도 한 번만 만들게 한다
         self._plan_lock = threading.Lock()
+        self.refresh()
+
+    def refresh(self) -> None:
+        """가게 설정을 DB에서 다시 읽는다. 웹·MCP는 요청마다 부른다 (다른 화면·프로세스에서 고쳤을 수 있다)."""
+        settings = self.store.settings()
+        self.catalog = self.store.catalog() or self.default_catalog
+        self.calendar = calendar_from_settings(settings, self.default_calendar)
+        self.knowledge = settings.get(KNOWLEDGE, STORE_KNOWLEDGE)
+        if self.memory is not None:
+            self.memory.use(self.catalog, self.calendar)
 
     # 지금 할 일 ------------------------------------------------------------------
 
@@ -255,7 +294,12 @@ class StoreService:
         base = SeasonalPolicy().decide(ctx)
         decisions = {}
         if ctx.notes and self.llm_factory is not None:
-            agent = AgentPolicy(self.llm_factory(), memory=self.memory)
+            agent = AgentPolicy(
+                self.llm_factory(),
+                memory=self.memory,
+                use_knowledge=bool(self.knowledge.strip()),
+                knowledge=self.knowledge,
+            )
             recommended = agent.decide(ctx)
             decisions = {d.item_id: d for d in agent.decisions}
             if agent.summaries:
@@ -358,3 +402,175 @@ class StoreService:
                 estimated += sales[idx].get(item.id, 0) * item.price + cleared * item.price * MARKDOWN_RATE
             rows.append(RevenueRow(rec.day, rec.revenue, round(estimated, -2)))
         return rows
+
+    # 입고 ------------------------------------------------------------------------
+
+    def arrivals(self, day: date) -> tuple[dict[str, int], dict[str, float]]:
+        """day에 들어온 물건: (승인한 발주 수량, 입고로 기록된 양). 발주를 승인하면 그 수량이 입고로 기록된다."""
+        plan = self.store.plan(day - timedelta(days=1))
+        ordered = {}
+        if plan is not None and plan.approved and plan.arrival == day:
+            ordered = {ln.item_id: ln.final for ln in plan.lines if ln.final > 0}
+        return ordered, self.store.received(day)
+
+    def fix_received(self, day: date, changes: dict[str, float]) -> dict[str, float]:
+        """입고를 실제로 들어온 양으로 고친다 (덜 왔거나, 시장에 물건이 없었거나, 더 사 온 경우).
+
+        판매량은 "어제 재고 + 오늘 입고 - 오늘 재고"로 역산하므로, 입고가 틀리면 판매량과 다음 발주가 같이 틀린다.
+        마감 재고표를 확정하기 전, 지금 재고표를 쓸 날 것만 고칠 수 있다. 고친 뒤의 입고 기록을 돌려준다.
+        """
+        step, current = self.status()
+        if step != SHEET or day != current:
+            now = f"지금은 {current} {'재고표' if step == SHEET else '발주'} 차례"
+            raise ValueError(f"입고는 그날 마감 재고표를 확정하기 전에만 고칠 수 있습니다 ({now}).")
+        known = {i.id for i in self.catalog.items}
+        received = self.store.received(day)
+        for item_id, qty in changes.items():
+            if item_id not in known:
+                raise ValueError(f"취급하는 품목이 아닙니다: {item_id}")
+            if not math.isfinite(qty) or qty < 0:
+                raise ValueError(f"{self.catalog.item(item_id).name}: 입고 수량은 0 이상이어야 합니다.")
+            received[item_id] = round(qty, 2)
+        self.store.save_received(day, received)
+        return self.store.received(day)
+
+    # 가게 설정 --------------------------------------------------------------------
+
+    def _drop_pending_plan(self) -> None:
+        """승인 전 발주 추천을 지워 바뀐 설정으로 다시 만들게 한다 (품목·입고 요일이 바뀌면 추천이 맞지 않는다)."""
+        last = self.store.last_closed_day()
+        if last is not None:
+            self.store.delete_unapproved_plan(last)
+
+    def _save_catalog(self, catalog: Catalog) -> None:
+        before = {i.id for i in self.catalog.items}
+        self.store.save_catalog(catalog)
+        self.refresh()
+        if {i.id for i in catalog.items} != before:
+            self._drop_pending_plan()
+
+    def save_item(
+        self,
+        item_id: str | None,
+        *,
+        name: str,
+        category: str,
+        unit: str,
+        supplier_id: str,
+        base_demand: float,
+        price: int,
+        cost: int,
+        shelf_life: int,
+    ) -> Item:
+        """품목을 고치거나(item_id), item_id가 None이면 새로 더한다. 입력이 잘못되면 ValueError."""
+        catalog = self.catalog
+        name = name.strip()
+        if item_id is not None and item_id not in {i.id for i in catalog.all_items}:
+            raise ValueError("없는 품목입니다.")
+        if not name or len(name) > 20:
+            raise ValueError("품목 이름을 1~20자로 적어 주세요.")
+        same = next((i for i in catalog.all_items if i.name == name and i.id != item_id), None)
+        if same is not None:
+            if same in catalog.retired:
+                raise ValueError(f"취급을 그만둔 품목에 '{name}'이(가) 있습니다. 그 품목을 다시 취급으로 바꿔 주세요.")
+            raise ValueError(f"'{name}'은(는) 이미 있는 품목입니다.")
+        if category not in {c.value for c in Category}:
+            raise ValueError("분류를 골라 주세요.")
+        if unit not in UNITS:
+            raise ValueError("단위를 골라 주세요.")
+        if supplier_id not in {s.id for s in catalog.suppliers}:
+            raise ValueError("거래처를 골라 주세요.")
+        if not (math.isfinite(base_demand) and base_demand >= 0) or price < 0 or cost < 0:
+            raise ValueError("판매량·가격은 0 이상으로 적어 주세요.")
+        if not 1 <= shelf_life <= 30:
+            raise ValueError("정가로 파는 기간은 1~30일로 적어 주세요.")
+        item = Item(
+            id=item_id or _new_id("item", {i.id for i in catalog.all_items}),
+            name=name,
+            category=Category(category),
+            unit=unit,
+            supplier_id=supplier_id,
+            base_demand=float(base_demand),
+            price=int(price),
+            cost=int(cost),
+            shelf_life=int(shelf_life),
+        )
+        self._save_catalog(catalog.with_item(item))
+        return item
+
+    def set_item_active(self, item_id: str, active: bool) -> None:
+        """품목 취급을 그만두거나 다시 취급한다. 지난 기록에 남아 있어서 지우지는 않는다."""
+        catalog = self.catalog
+        if item_id not in {i.id for i in catalog.all_items}:
+            raise ValueError("없는 품목입니다.")
+        if not active and [i.id for i in catalog.items] == [item_id]:
+            raise ValueError("취급하는 품목이 하나는 있어야 합니다.")
+        self._save_catalog(catalog.with_active(item_id, active))
+
+    def save_supplier(self, supplier_id: str | None, *, name: str, channel: str) -> Supplier:
+        """거래처를 고치거나(supplier_id), None이면 새로 더한다."""
+        catalog = self.catalog
+        name = name.strip()
+        if supplier_id is not None and supplier_id not in {s.id for s in catalog.suppliers}:
+            raise ValueError("없는 거래처입니다.")
+        if not name or len(name) > 30:
+            raise ValueError("거래처 이름을 1~30자로 적어 주세요.")
+        if any(s.name == name and s.id != supplier_id for s in catalog.suppliers):
+            raise ValueError(f"'{name}'은(는) 이미 있는 거래처입니다.")
+        if channel not in CHANNELS:
+            raise ValueError("주문 방식을 골라 주세요.")
+        supplier = Supplier(supplier_id or _new_id("supplier", {s.id for s in catalog.suppliers}), name, channel)
+        self._save_catalog(catalog.with_supplier(supplier))
+        return supplier
+
+    def delete_supplier(self, supplier_id: str) -> None:
+        """거래처를 지운다. 이 거래처에서 받는 품목이 있으면(취급을 그만둔 품목 포함) 지우지 않는다."""
+        catalog = self.catalog
+        using = [i.name for i in catalog.all_items if i.supplier_id == supplier_id]
+        if using:
+            more = f" 외 {len(using) - 3}개" if len(using) > 3 else ""
+            raise ValueError(f"이 거래처에서 받는 품목이 있어 지울 수 없습니다: {', '.join(using[:3])}{more}")
+        self._save_catalog(catalog.without_supplier(supplier_id))
+
+    def save_calendar(self, market_digits: tuple[int, ...], closed_weekdays: tuple[int, ...]) -> None:
+        """장날(날짜 끝자리, 2·7장이면 (2, 7))과 입고가 없는 요일(월=0 ... 일=6)."""
+        if any(not 0 <= d <= 9 for d in market_digits) or any(not 0 <= w <= 6 for w in closed_weekdays):
+            raise ValueError("장날이나 요일 값이 잘못됐습니다.")
+        if len(set(closed_weekdays)) >= 7:
+            raise ValueError("입고가 있는 요일이 하루는 있어야 합니다.")
+        # 입고 요일이 바뀌면 지금 발주가 버틸 날도 달라진다
+        self._drop_pending_plan()
+        self.store.save_setting(MARKET_DAYS, ",".join(str(d) for d in sorted(set(market_digits))))
+        self.store.save_setting(CLOSED_WEEKDAYS, ",".join(str(w) for w in sorted(set(closed_weekdays))))
+        self.refresh()
+
+    def save_knowledge(self, text: str) -> None:
+        """발주 에이전트가 참고할 사장님 경험 노트. 비우면 경험 노트 없이 판단한다."""
+        text = text.strip().replace("\r\n", "\n")
+        if len(text) > MAX_KNOWLEDGE_LEN:
+            raise ValueError(f"경험 노트는 {MAX_KNOWLEDGE_LEN:,}자까지 적을 수 있습니다.")
+        self.store.save_setting(KNOWLEDGE, text)
+        self.refresh()
+
+    def import_catalog(self, catalog: Catalog) -> Catalog:
+        """품목·거래처 목록을 통째로 바꾼다 (CSV로 한꺼번에 정할 때). 목록에서 빠진 품목은 취급을 그만둔 것으로 남긴다."""
+        ids, names = [i.id for i in catalog.all_items], [i.name for i in catalog.all_items]
+        problems = [f"id {x} 중복" for x in sorted({x for x in ids if ids.count(x) > 1})]
+        problems += [f"이름 {x} 중복" for x in sorted({x for x in names if names.count(x) > 1})]
+        problems += [f"{i.name}: 단위 {i.unit}" for i in catalog.all_items if i.unit not in UNITS]
+        problems += [f"{i.name}: 정가 판매 일수 {i.shelf_life}" for i in catalog.all_items if i.shelf_life < 1]
+        problems += [f"{s.name}: 주문 방식 {s.channel}" for s in catalog.suppliers if s.channel not in CHANNELS]
+        if problems:
+            raise ValueError("목록을 확인해 주세요: " + ", ".join(problems[:10]))
+        keep = set(ids)
+        dropped = tuple(i for i in self.catalog.all_items if i.id not in keep)
+        suppliers = {s.id for s in catalog.suppliers}
+        # 남겨 두는 품목의 거래처가 새 목록에 없으면 같이 남겨 둔다 (지난 발주를 거래처별로 보여줄 때 쓴다)
+        extra = tuple(
+            s for s in self.catalog.suppliers if s.id not in suppliers and any(i.supplier_id == s.id for i in dropped)
+        )
+        merged = Catalog(catalog.items, (*catalog.suppliers, *extra), (*catalog.retired, *dropped))
+        if not merged.items:
+            raise ValueError("취급하는 품목이 하나는 있어야 합니다.")
+        self._save_catalog(merged)
+        return merged
