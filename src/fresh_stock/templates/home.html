@@ -62,16 +62,20 @@
 <h2>최근 매출</h2>
 <div class="card">
   <p class="muted" style="margin-top:0">추정 매출은 재고표로 역산한 판매량 × 가격이에요 (떨이는 할인가). 차이가 크면 할인이나 기록 실수가 있었을 수 있어요.</p>
+  {% set with_purchase = revenue | selectattr('purchase') | list %}
   <table>
-    <colgroup><col style="width:4.5em"><col><col><col style="width:5.5em"></colgroup>
-    <tr><th>날짜</th><th class="num">실제 (현금+카드)</th><th class="num">추정</th><th class="num">차이</th></tr>
+    <colgroup><col style="width:4.5em"><col><col><col style="width:5.5em">{% if with_purchase %}<col>{% endif %}</colgroup>
+    <tr><th>날짜</th><th class="num">실제 (현금+카드)</th><th class="num">추정</th><th class="num">차이</th>
+        {% if with_purchase %}<th class="num">사입</th>{% endif %}</tr>
     {% for r in revenue %}
       <tr><td>{{ r.day | day }}</td><td class="num">{{ r.actual | won }}</td><td class="num">{{ r.estimated | won }}</td>
-          <td class="num">{{ r.gap | won }}</td></tr>
+          <td class="num">{{ r.gap | won }}</td>
+          {% if with_purchase %}<td class="num">{{ r.purchase | won if r.purchase else '-' }}</td>{% endif %}</tr>
     {% else %}
       <tr><td colspan="4" class="muted">아직 기록이 없어요.</td></tr>
     {% endfor %}
   </table>
+  {% if with_purchase %}<p class="muted" style="margin-bottom:0">사입은 재고표의 사입 수량 × 사입 가격이에요.</p>{% endif %}
 </div>
 
 <h2>재고표 인식 기록</h2>

@@ -8,11 +8,15 @@
   <div class="card">{{ status_day | day }} 발주가 아직 남아 있어요. <a href="/order">발주 확인하기</a></div>
 {% else %}
 {% if saved %}<div class="note">입고를 저장했어요.</div>{% endif %}
+{% if store_layout %}
+<p class="muted">재고표의 사입 수량·가격 칸이 그날 들어온 양과 산 가격으로 기록돼요. 주문과 다르게 들어왔으면 종이에 실제 양을 적어 주세요.</p>
+{% else %}
 <div class="card row" style="justify-content:space-between">
   <span>오늘 입고 {{ n_received }}품목{% if n_differs %} <span class="flags">· 주문과 다른 품목 {{ n_differs }}개</span>{% endif %}
     <br><span class="muted">주문과 다르게 들어왔으면 재고표를 읽기 전에 고쳐 주세요.</span></span>
   <a class="btn small secondary" href="/received">입고 확인·수정</a>
 </div>
+{% endif %}
 <div class="card">
   <form method="post" action="/sheet" enctype="multipart/form-data" data-loading="AI가 재고표를 읽는 중이에요. 20초 정도 걸려요.">
     <p style="margin-top:0">평소처럼 종이에 적은 마감 재고표를 찍어 올려 주세요.</p>

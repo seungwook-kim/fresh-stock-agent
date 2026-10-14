@@ -219,3 +219,25 @@ def test_received_page_fixes_arrivals():
     r = c.post("/received", data={f"recv_{item}": "많이"})
     assert "수량을 알 수 없습니다" in r.text and 'value="많이"' in r.text
     assert env.store.received(day)[item] == 1.5
+
+
+def test_store_layout_sheet_saves_purchases():
+    env = WebEnv(FakeLLM())
+    env.login()
+    c, day = env.client, env.first
+    r = c.post("/settings/sheet-layout", data={"layout": "store"}, follow_redirects=True)
+    assert "재고표 형식을 저장했어요" in r.text
+    page = c.get("/sheet").text
+    assert "사입 수량·가격 칸이" in page and "입고 확인·수정" not in page
+    assert c.get("/received", follow_redirects=False).headers["location"] == "/sheet"
+
+    review = c.post("/sheet", files={"photo": ("sheet.jpg", b"x", "image/jpeg")}, follow_redirects=True).text
+    assert 'name="buyq_0"' in review and 'name="buyp_0"' in review and "그날 입고와 사입 가격으로" in review
+    form = {"item_0": "tomato", "qty_0": "4반", "buyq_0": "3", "buyp_0": "15,000",
+            "item_1": "tangerine", "qty_1": "2", "buyq_1": "", "buyp_1": "", "cash": "1", "card": "1"}  # fmt: skip
+    bad = c.post("/sheet/confirm", data={**form, "buyp_0": "비쌈"})
+    assert "빨간 줄" in bad.text and 'value="비쌈"' in bad.text
+    c.post("/sheet/confirm", data=form, follow_redirects=True)
+    assert env.store.received(day) == {"tomato": 3.0}  # 주문 수량 대신 재고표 사입 칸
+    assert env.store.prices(day) == {"tomato": 15000}
+    assert "45,000원" in c.get("/").text  # 홈 매출 표의 사입 금액

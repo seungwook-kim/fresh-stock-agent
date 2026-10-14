@@ -17,10 +17,10 @@ from mcp.server.mcpserver import MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
 from mcp.types import ToolAnnotations
 
-from .recognition import parse_qty
+from .recognition import parse_price, parse_qty
 from .research import match_item
 from .market_calendar import today_kst
-from .service import ORDER, SHEET, StoreService
+from .service import ORDER, SHEET, STORE_LAYOUT, StoreService
 from .store import OWNER_NOTE, Database, Note
 
 INSTRUCTIONS = """청과 매장 재고·발주 도구다. 하루 업무 순서: today로 할 일 확인 → 사장님 메모 추가(add_note) →
@@ -207,20 +207,21 @@ def build_server(db: Database, make_service: Callable[[int], StoreService], emai
         if media is None:
             raise ToolError("jpg, png, webp 사진만 읽을 수 있습니다.")
         rows = service.read_sheet(day, path.read_bytes(), media)
-        return {
-            "day": day.isoformat(),
-            "rows": [
-                {
-                    "line": r.idx,
-                    "written": f"{r.raw_name} {r.raw_qty}",
-                    "item": service.catalog.item(r.item_id_read).name if r.item_id_read else None,
-                    "qty": r.qty_read,
-                    "needs_check": list(r.flags),
-                }
-                for r in rows
-            ],
-            "needs_check_count": sum(bool(r.flags) for r in rows),
-        }
+        store_layout = service.sheet_layout == STORE_LAYOUT
+        lines = []
+        for r in rows:
+            line = {
+                "line": r.idx,
+                "written": f"{r.raw_name} {r.raw_qty}",
+                "item": service.catalog.item(r.item_id_read).name if r.item_id_read else None,
+                "qty": r.qty_read,
+                "needs_check": list(r.flags),
+            }
+            if store_layout:  # 사입 칸: 그날 실제로 들어온 양과 산 가격
+                line.update(written_buy=f"{r.raw_buy_qty} / {r.raw_buy_price}", buy_qty=r.buy_qty_read,
+                            buy_price=r.buy_price_read)  # fmt: skip
+            lines.append(line)
+        return {"day": day.isoformat(), "rows": lines, "needs_check_count": sum(bool(r.flags) for r in rows)}
 
     @server.tool(annotations=WRITES)
     def confirm_sheet(
@@ -232,7 +233,9 @@ def build_server(db: Database, make_service: Callable[[int], StoreService], emai
         [{"line": 3, "qty": "4반"}, {"line": 7, "item": "사과", "qty": "2"}, {"item": "참외", "qty": "1"}].
         line은 read_sheet의 줄 번호, line 없이 item만 주면 그 품목 줄을 고치거나 새 줄로 더한다.
         needs_check가 있는 줄은 모두 corrections로 확인받아야 저장된다 (읽은 값이 맞으면 그 값 그대로 넣는다).
-        재고표를 읽지 않았으면 corrections가 재고표 전체이고, 적지 않은 품목은 재고 0이다."""
+        재고표를 읽지 않았으면 corrections가 재고표 전체이고, 적지 않은 품목은 재고 0이다.
+        사입 칸이 있는 재고표면 buy_qty·buy_price로 사입 수량·가격도 고칠 수 있다 ({"line": 4, "buy_qty": "3",
+        "buy_price": "42000"}, 빈 문자열은 안 들어온 것). 확정하면 사입 칸이 그날 입고와 사입 가격으로 기록된다."""
         _, service = use(store_id)
         step, day = service.status()
         if step != SHEET:
@@ -246,12 +249,19 @@ def build_server(db: Database, make_service: Callable[[int], StoreService], emai
         finals: dict[int, tuple[str | None, float | None]] = {
             idx: (r.item_id_read, r.qty_read) for idx, r in sheet.items()
         }
+        buys: dict[int, tuple[float | None, int | None]] | None = None
+        if service.sheet_layout == STORE_LAYOUT:
+            buys = {idx: (r.buy_qty_read, r.buy_price_read) for idx, r in sheet.items()}
         checked: set[int] = set()
         errors = []
         next_idx = max(sheet, default=-1) + 1
         for c in corrections or []:
             name, qty_text = str(c.get("item") or "").strip(), str(c.get("qty", "")).strip()
-            qty = parse_qty(qty_text)
+            if "qty" not in c and c.get("line") is not None and int(c["line"]) in sheet:
+                qty_text = sheet[int(c["line"])].raw_qty  # 사입 칸만 고치는 줄은 읽은 재고를 그대로 쓴다
+                qty = sheet[int(c["line"])].qty_read
+            else:
+                qty = parse_qty(qty_text)
             item_id = (match_item(name, service.catalog) or (name if name in known_ids else None)) if name else None
             line = c.get("line")
             if line is not None:
@@ -271,6 +281,15 @@ def build_server(db: Database, make_service: Callable[[int], StoreService], emai
             if qty is None or (item_id is None and qty != 0):
                 errors.append(f"{name or f'{line}번 줄'} {qty_text}")
                 continue
+            if buys is not None and ("buy_qty" in c or "buy_price" in c):
+                old_qty, old_price = buys.get(idx, (None, None))
+                buy_qty_text, buy_price_text = str(c.get("buy_qty", "")).strip(), str(c.get("buy_price", "")).strip()
+                buy_qty = parse_qty(buy_qty_text) if buy_qty_text else None
+                buy_price = parse_price(buy_price_text) if buy_price_text else None
+                if (buy_qty_text and buy_qty is None) or (buy_price_text and buy_price is None):
+                    errors.append(f"{name or f'{line}번 줄'} 사입 {buy_qty_text} / {buy_price_text}")
+                    continue
+                buys[idx] = (buy_qty if "buy_qty" in c else old_qty, buy_price if "buy_price" in c else old_price)
             finals[idx] = (item_id, qty)
             checked.add(idx)
         if errors:
@@ -284,11 +303,12 @@ def build_server(db: Database, make_service: Callable[[int], StoreService], emai
             )
         rows = list(sheet.values())
         missing = service.missing_items(day, rows) if rows else []
-        closing = service.confirm_sheet(day, finals, cash, card)
+        closing = service.confirm_sheet(day, finals, cash, card, buys)
         next_step, _ = service.status()
         return {
             "day": day.isoformat(),
             "saved_items": sum(1 for q in closing.values() if q > 0),
+            "received_items": len(service.store.received(day)) if buys is not None else None,
             "zero_but_expected": [service.catalog.item(i).name for i in missing if closing.get(i, 0) == 0],
             "next_action": "get_order_plan으로 발주 추천 확인" if next_step == ORDER else "내일 재고표",
         }

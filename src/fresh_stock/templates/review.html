@@ -9,6 +9,13 @@
     {% endfor %}
   </select>
 {% endmacro %}
+{% macro buy_row(idx, row_class, qty, price, span=3) %}
+  <tr class="{{ row_class }}"><td colspan="{{ span }}" style="border-top:0; padding-top:0">
+    <span class="muted">사입</span>
+    <input name="buyq_{{ idx }}" inputmode="decimal" placeholder="수량" value="{{ qty }}" style="width:4.6em; text-align:right">
+    <input name="buyp_{{ idx }}" inputmode="numeric" placeholder="가격" value="{{ price }}" style="width:7em; text-align:right"> 원
+  </td></tr>
+{% endmacro %}
 {% block content %}
 <h1>{{ day | day }} 재고표 확인</h1>
 {% if error %}<div class="alert">{{ error }}</div>{% endif %}
@@ -16,6 +23,7 @@
   {{ rows | length }}줄을 읽었어요.
   {% if flagged %}<b>노란 줄 {{ flagged }}개</b>만 사진과 비교해 확인해 주세요.{% else %}확인이 필요한 줄은 없어요.{% endif %}
   수량은 <code>4.5</code>, <code>4반</code>처럼 적어도 돼요.
+  {% if store_layout %}사입 칸은 그날 실제로 들어온 양과 산 가격이에요. 확정하면 그날 입고와 사입 가격으로 기록돼요 (빈 칸은 안 들어온 것).{% endif %}
 </div>
 <details class="card"><summary>재고표 사진 보기</summary>
   <img class="sheet" src="/sheet/image/{{ day.isoformat() }}" alt="{{ day | day }} 마감 재고표">
@@ -28,13 +36,20 @@
     <tr><th>적힌 글자</th><th>품목</th><th class="num">재고</th></tr>
     {% for r in rows %}
       {% set typed = entered.get(r.idx) %}
-      <tr class="{{ 'warn' if r.idx in bad else ('flag' if r.flags) }}">
+      {% set row_class = 'warn' if r.idx in bad else ('flag' if r.flags) %}
+      <tr class="{{ row_class }}">
         <td>{{ r.raw_name }} <b>{{ r.raw_qty }}</b>
+          {% if store_layout and (r.raw_buy_qty or r.raw_buy_price) %}<div class="muted">사입 {{ r.raw_buy_qty or '-' }} · {{ r.raw_buy_price or '-' }}</div>{% endif %}
           {% if r.flags %}<div class="flags">{{ r.flags | join(' · ') }}</div>{% endif %}</td>
         <td>{{ item_select('item_%d' % r.idx, typed[0] if typed else r.item_id_read) }}</td>
         <td class="num"><input class="qty" name="qty_{{ r.idx }}"
           value="{{ typed[1] if typed else ('%g' % r.qty_read if r.qty_read is not none else r.raw_qty) }}"></td>
       </tr>
+      {% if store_layout %}
+        {{ buy_row(r.idx, row_class,
+                   typed[2] if typed else ('%g' % r.buy_qty_read if r.buy_qty_read is not none else r.raw_buy_qty),
+                   typed[3] if typed else (r.buy_price_read if r.buy_price_read is not none else r.raw_buy_price)) }}
+      {% endif %}
     {% endfor %}
   </table>
 </div>
@@ -56,6 +71,7 @@
       {% set typed = entered.get(idx) %}
       <tr class="{{ 'warn' if idx in bad }}"><td>{{ item_select('item_%d' % idx, typed[0] if typed else None) }}</td>
           <td class="num"><input class="qty" name="qty_{{ idx }}" placeholder="수량" value="{{ typed[1] if typed else '' }}"></td></tr>
+      {% if store_layout %}{{ buy_row(idx, 'warn' if idx in bad else '', typed[2] if typed else '', typed[3] if typed else '', 2) }}{% endif %}
     {% endfor %}
   </table>
 </div>

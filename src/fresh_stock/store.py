@@ -117,6 +117,18 @@ CREATE TABLE IF NOT EXISTS catalog_item (
 CREATE TABLE IF NOT EXISTS store_setting (
     store_id INTEGER NOT NULL, key TEXT NOT NULL, value TEXT NOT NULL,
     PRIMARY KEY (store_id, key)
+);
+CREATE TABLE IF NOT EXISTS sheet_buy (
+    -- 사입 칸이 있는 재고표의 사입 수량·가격 (sheet_row와 같은 줄 번호). 모델이 읽은 값과 사람이 확정한 값
+    store_id INTEGER NOT NULL, day TEXT NOT NULL, idx INTEGER NOT NULL,
+    raw_qty TEXT NOT NULL DEFAULT '', raw_price TEXT NOT NULL DEFAULT '',
+    qty_read DOUBLE PRECISION, price_read INTEGER, qty_final DOUBLE PRECISION, price_final INTEGER,
+    PRIMARY KEY (store_id, day, idx)
+);
+CREATE TABLE IF NOT EXISTS received_price (
+    -- 그날 들어온 품목을 단위당 얼마에 샀는지 (재고표 사입 가격)
+    store_id INTEGER NOT NULL, day TEXT NOT NULL, item_id TEXT NOT NULL, price INTEGER NOT NULL,
+    PRIMARY KEY (store_id, day, item_id)
 )
 """
 DIALECT_TYPES = {
@@ -145,6 +157,8 @@ TABLES = {
         "shelf_life", "active",
     ),
     "store_setting": ("store_id", "key", "value"),
+    "sheet_buy": ("store_id", "day", "idx", "raw_qty", "raw_price", "qty_read", "price_read", "qty_final", "price_final"),
+    "received_price": ("store_id", "day", "item_id", "price"),
 }  # fmt: skip
 SERIAL_TABLES = ("stores", "note")  # 옮긴 뒤 다음 id를 맞춰야 하는 테이블
 OWNER, STAFF = "owner", "staff"
@@ -180,6 +194,13 @@ class SheetRowRecord:
     flags: tuple[str, ...]
     item_id_final: str | None
     qty_final: float | None
+    # 사입 칸이 있는 재고표만 (sheet_buy)
+    raw_buy_qty: str = ""
+    raw_buy_price: str = ""
+    buy_qty_read: float | None = None
+    buy_price_read: int | None = None
+    buy_qty_final: float | None = None
+    buy_price_final: int | None = None
 
 
 @dataclass(frozen=True)
@@ -451,6 +472,45 @@ class Store:
                 [(s, d, i, q) for i, q in received.items() if q > 0],
             )
 
+    def save_prices(self, day: date, prices: dict[str, int]) -> None:
+        """그날 들어온 품목의 단위당 사입 가격. 그날 기록을 통째로 바꾼다."""
+        s, d = self.store_id, day.isoformat()
+        with self._tx() as tx:
+            tx.execute("DELETE FROM received_price WHERE store_id = ? AND day = ?", (s, d))
+            tx.executemany(
+                "INSERT INTO received_price (store_id, day, item_id, price) VALUES (?, ?, ?, ?)",
+                [(s, d, i, int(p)) for i, p in prices.items() if p is not None and p > 0],
+            )
+
+    def prices(self, day: date) -> dict[str, int]:
+        with self._tx() as tx:
+            return dict(
+                tx.all(
+                    "SELECT item_id, price FROM received_price WHERE store_id = ? AND day = ?",
+                    (self.store_id, day.isoformat()),
+                )
+            )
+
+    def last_prices(self, before: date | None = None) -> dict[str, int]:
+        """품목별 가장 최근 사입 가격 (before가 있으면 그 전날까지)."""
+        with self._tx() as tx:
+            rows = tx.all(
+                "SELECT item_id, day, price FROM received_price WHERE store_id = ? AND day < ? ORDER BY day",
+                (self.store_id, before.isoformat() if before else "9999-12-31"),
+            )
+        return {item_id: price for item_id, _, price in rows}
+
+    def purchase_totals(self) -> dict[date, int]:
+        """날짜별 사입 금액 (입고 수량 × 사입 가격). 사입 가격이 적힌 날만."""
+        with self._tx() as tx:
+            rows = tx.all(
+                "SELECT r.day, SUM(r.qty * p.price) FROM received r JOIN received_price p"
+                " ON p.store_id = r.store_id AND p.day = r.day AND p.item_id = r.item_id"
+                " WHERE r.store_id = ? GROUP BY r.day",
+                (self.store_id,),
+            )
+        return {date.fromisoformat(d): round(total) for d, total in rows}
+
     def received(self, day: date) -> dict[str, float]:
         with self._tx() as tx:
             return dict(
@@ -620,6 +680,18 @@ class Store:
                 (s, d, image),
             )
             tx.execute("DELETE FROM sheet_row WHERE store_id = ? AND day = ?", (s, d))
+            tx.execute("DELETE FROM sheet_buy WHERE store_id = ? AND day = ?", (s, d))
+            buys = [
+                (s, d, r.idx, r.raw_buy_qty, r.raw_buy_price, r.buy_qty_read, r.buy_price_read, r.buy_qty_final,
+                 r.buy_price_final)
+                for r in rows
+                if r.raw_buy_qty or r.raw_buy_price or r.buy_qty_read is not None or r.buy_price_read is not None
+            ]  # fmt: skip
+            tx.executemany(
+                "INSERT INTO sheet_buy (store_id, day, idx, raw_qty, raw_price, qty_read, price_read, qty_final,"
+                " price_final) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                buys,
+            )
             tx.executemany(
                 "INSERT INTO sheet_row (store_id, day, idx, raw_name, raw_qty, item_id_read, qty_read, flags,"
                 " item_id_final, qty_final) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
@@ -648,13 +720,17 @@ class Store:
     def sheet_rows(self, day: date) -> list[SheetRowRecord]:
         with self._tx() as tx:
             rows = tx.all(
-                "SELECT idx, raw_name, raw_qty, item_id_read, qty_read, flags, item_id_final, qty_final"
-                " FROM sheet_row WHERE store_id = ? AND day = ? ORDER BY idx",
+                "SELECT r.idx, r.raw_name, r.raw_qty, r.item_id_read, r.qty_read, r.flags, r.item_id_final, r.qty_final,"
+                " b.raw_qty, b.raw_price, b.qty_read, b.price_read, b.qty_final, b.price_final"
+                " FROM sheet_row r LEFT JOIN sheet_buy b ON b.store_id = r.store_id AND b.day = r.day AND b.idx = r.idx"
+                " WHERE r.store_id = ? AND r.day = ? ORDER BY r.idx",
                 (self.store_id, day.isoformat()),
             )
         return [
-            SheetRowRecord(idx, name, qty_text, iid, q, tuple(json.loads(flags)), fid, fq)
-            for idx, name, qty_text, iid, q, flags, fid, fq in rows
+            SheetRowRecord(
+                idx, name, qty_text, iid, q, tuple(json.loads(flags)), fid, fq, braw or "", praw or "", bq, bp, bqf, bpf
+            )
+            for idx, name, qty_text, iid, q, flags, fid, fq, braw, praw, bq, bp, bqf, bpf in rows
         ]
 
     def finalize_sheet_rows(self, day: date, finals: dict[int, tuple[str | None, float | None]]) -> None:
@@ -662,6 +738,16 @@ class Store:
             tx.executemany(
                 "UPDATE sheet_row SET item_id_final = ?, qty_final = ? WHERE store_id = ? AND day = ? AND idx = ?",
                 [(iid, q, self.store_id, day.isoformat(), idx) for idx, (iid, q) in finals.items()],
+            )
+
+    def finalize_sheet_buys(self, day: date, buys: dict[int, tuple[float | None, int | None]]) -> None:
+        """사람이 확정한 사입 수량·가격 (줄 번호 → (수량, 가격)). 확인 화면에서 더한 줄도 넣는다."""
+        with self._tx() as tx:
+            tx.executemany(
+                "INSERT INTO sheet_buy (store_id, day, idx, qty_final, price_final) VALUES (?, ?, ?, ?, ?)"
+                " ON CONFLICT (store_id, day, idx) DO UPDATE SET qty_final = excluded.qty_final,"
+                " price_final = excluded.price_final",
+                [(self.store_id, day.isoformat(), idx, q, p) for idx, (q, p) in buys.items()],
             )
 
     def confirmed_names(self) -> dict[str, str]:

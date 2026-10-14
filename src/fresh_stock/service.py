@@ -32,6 +32,8 @@ from .store import OWNER_NOTE, Note, OrderLineRecord, OrderPlan, Research, Sheet
 SHEET, ORDER = "sheet", "order"
 # 가게 설정 키 (store_setting)
 MARKET_DAYS, CLOSED_WEEKDAYS, KNOWLEDGE = "market_days", "closed_weekdays", "knowledge"
+# 재고표 형식: simple은 품목·남은 수량, store는 품목·남은 수량·사입 수량·사입 가격 (실제 가게 종이 형식)
+SHEET_LAYOUT, SIMPLE, STORE_LAYOUT = "sheet_layout", "simple", "store"
 MAX_KNOWLEDGE_LEN = 4000  # 경험 노트는 발주 에이전트 프롬프트에 그대로 들어간다
 
 
@@ -61,6 +63,7 @@ class RevenueRow:
     day: date
     actual: int  # 돈통 현금 + 카드 합계
     estimated: int  # 재고로 역산한 판매량 × 가격 (떨이는 할인가)
+    purchase: int | None = None  # 그날 사입 금액 (재고표 사입 가격이 있는 날만)
 
     @property
     def gap(self) -> int:
@@ -99,6 +102,7 @@ class StoreService:
         self.catalog = self.store.catalog() or self.default_catalog
         self.calendar = calendar_from_settings(settings, self.default_calendar)
         self.knowledge = settings.get(KNOWLEDGE, STORE_KNOWLEDGE)
+        self.sheet_layout = settings.get(SHEET_LAYOUT, SIMPLE)
         if self.memory is not None:
             self.memory.use(self.catalog, self.calendar)
 
@@ -176,6 +180,8 @@ class StoreService:
         if self.llm_factory is None:
             raise RuntimeError("재고표를 읽으려면 LLM이 필요합니다.")
         max_possible, expected = self.sheet_bounds(day)
+        purchases = self.sheet_layout == STORE_LAYOUT
+        ordered, _ = self.arrivals(day)
         rows = recognize_sheet(
             self.llm_factory(),
             ImageInput(image, media_type),
@@ -184,11 +190,18 @@ class StoreService:
             expected,
             f"sheet {day}",
             aliases=self.learned_aliases(),
+            purchases=purchases,
+            prev_closing=self.store.closing(day - timedelta(days=1)) if purchases else None,
+            ordered=ordered,
+            ref_prices=self.store.last_prices(before=day) if purchases else None,
         )
         records = [
-            SheetRowRecord(n, r.raw_name, r.raw_qty, r.item_id, r.qty, tuple(r.flags), None, None)
+            SheetRowRecord(
+                n, r.raw_name, r.raw_qty, r.item_id, r.qty, tuple(r.flags), None, None,
+                r.raw_buy_qty, r.raw_buy_price, r.buy_qty, r.buy_price,
+            )
             for n, r in enumerate(rows)
-        ]
+        ]  # fmt: skip
         self.store.save_sheet(day, image, records)
         return records
 
@@ -199,14 +212,37 @@ class StoreService:
         return [i.id for i in self.catalog.items if i.id not in on_sheet and expected.get(i.id, 0) >= 1]
 
     def confirm_sheet(
-        self, day: date, finals: dict[int, tuple[str | None, float | None]], cash: int, card: int
+        self,
+        day: date,
+        finals: dict[int, tuple[str | None, float | None]],
+        cash: int,
+        card: int,
+        buys: dict[int, tuple[float | None, int | None]] | None = None,
     ) -> dict[str, float]:
-        """사람이 확인한 재고표로 그날 마감 재고를 저장한다. 표에 없는 품목은 0, 같은 품목 두 줄은 더한다 (창고 + 진열대)."""
+        """사람이 확인한 재고표로 그날 마감 재고를 저장한다. 표에 없는 품목은 0, 같은 품목 두 줄은 더한다 (창고 + 진열대).
+
+        buys(줄 번호 → (사입 수량, 사입 가격))를 주면 사입 칸이 있는 재고표다. 사입 칸이 그날 실제로 들어온 양이므로
+        승인한 발주 수량 대신 그 값으로 그날 입고를 바꾸고, 사입 가격을 기록한다. 빈 칸은 안 들어온 것이다.
+        """
         closing = {i.id: 0.0 for i in self.catalog.items}
         for item_id, qty in finals.values():
             if item_id in closing and qty is not None:
                 closing[item_id] += qty
         self.store.finalize_sheet_rows(day, finals)
+        if buys is not None:
+            received: dict[str, float] = {}
+            prices: dict[str, int] = {}
+            for idx, (qty, price) in buys.items():
+                item_id = finals.get(idx, (None, None))[0]
+                if item_id not in closing:
+                    continue
+                if qty:
+                    received[item_id] = received.get(item_id, 0.0) + qty
+                if price:
+                    prices[item_id] = price
+            self.store.finalize_sheet_buys(day, buys)
+            self.store.save_received(day, received)
+            self.store.save_prices(day, prices)
         self.store.save_day(day, closing, cash, card)
         return closing
 
@@ -393,6 +429,7 @@ class StoreService:
         """실제 매출(현금+카드)과 재고로 역산한 추정 매출. 차이는 할인·기록 실수 등이다."""
         ledger = self.store.ledger()
         sales = regular_sales_series(ledger, self.catalog)
+        purchases = self.store.purchase_totals()
         rows = []
         for idx in range(max(1, len(ledger) - days), len(ledger)):
             rec = ledger[idx]
@@ -400,7 +437,7 @@ class StoreService:
             for item in self.catalog.items:
                 cleared = clearance_estimate(ledger, idx, item)
                 estimated += sales[idx].get(item.id, 0) * item.price + cleared * item.price * MARKDOWN_RATE
-            rows.append(RevenueRow(rec.day, rec.revenue, round(estimated, -2)))
+            rows.append(RevenueRow(rec.day, rec.revenue, round(estimated, -2), purchases.get(rec.day)))
         return rows
 
     # 입고 ------------------------------------------------------------------------
@@ -419,6 +456,8 @@ class StoreService:
         판매량은 "어제 재고 + 오늘 입고 - 오늘 재고"로 역산하므로, 입고가 틀리면 판매량과 다음 발주가 같이 틀린다.
         마감 재고표를 확정하기 전, 지금 재고표를 쓸 날 것만 고칠 수 있다. 고친 뒤의 입고 기록을 돌려준다.
         """
+        if self.sheet_layout == STORE_LAYOUT:
+            raise ValueError("이 가게는 재고표의 사입 칸으로 그날 입고를 기록합니다. 재고표에 실제로 들어온 양을 적어 주세요.")
         step, current = self.status()
         if step != SHEET or day != current:
             now = f"지금은 {current} {'재고표' if step == SHEET else '발주'} 차례"
@@ -542,6 +581,13 @@ class StoreService:
         self._drop_pending_plan()
         self.store.save_setting(MARKET_DAYS, ",".join(str(d) for d in sorted(set(market_digits))))
         self.store.save_setting(CLOSED_WEEKDAYS, ",".join(str(w) for w in sorted(set(closed_weekdays))))
+        self.refresh()
+
+    def save_sheet_layout(self, layout: str) -> None:
+        """재고표 형식. store면 사입 수량·가격 칸까지 읽고, 그 칸으로 그날 입고와 사입 가격을 기록한다."""
+        if layout not in (SIMPLE, STORE_LAYOUT):
+            raise ValueError("재고표 형식을 골라 주세요.")
+        self.store.save_setting(SHEET_LAYOUT, layout)
         self.refresh()
 
     def save_knowledge(self, text: str) -> None:

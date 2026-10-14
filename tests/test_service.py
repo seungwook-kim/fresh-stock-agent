@@ -385,3 +385,47 @@ def test_import_catalog_keeps_dropped_items(tmp_path, demo):
     bad.write_text(items_csv.replace("apple,사과,과일,박스", "apple,사과,과일,상자"), encoding="utf-8")
     with pytest.raises(ValueError, match="단위 상자"):
         service.import_catalog(load_catalog(bad, tmp_path / "suppliers.csv"))
+
+
+def _buy_row(name, qty, item_id, buy_qty="", buy_price=""):
+    return {**_row(name, qty, item_id), "raw_buy_qty": buy_qty, "raw_buy_price": buy_price}
+
+
+def test_store_layout_sheet_records_arrivals_and_prices(demo):
+    """사입 칸이 있는 재고표: 사입 칸이 그날 실제로 들어온 양과 산 가격이다. 확정하면 발주 수량 대신 그 값으로 입고를 기록한다."""
+    store, day = demo
+    ordered = store.received(day)  # 승인한 발주가 입고로 기록돼 있다
+    short, missing = sorted(ordered, key=ordered.get, reverse=True)[:2]
+    extra = next(i.id for i in catalog.items if i.id not in ordered)
+    names = {i: catalog.item(i).name for i in (short, missing, extra)}
+    llm = FakeLLM(sheet_rows=[
+        _buy_row(names[short], "1", short, f"{ordered[short] - 1:g}", f"{catalog.item(short).cost:,}"),
+        _buy_row(names[missing], "0", missing),  # 주문했는데 사입 칸이 비어 있음
+        _buy_row(names[extra], "1", extra, "2", "3000"),  # 주문 없이 더 사 옴
+    ])  # fmt: skip
+    service = StoreService(store, catalog, calendar, llm_factory=lambda: llm)
+    with pytest.raises(ValueError):
+        service.save_sheet_layout("photo")
+    service.save_sheet_layout("store")
+    assert service.sheet_layout == "store"
+
+    rows = service.read_sheet(day, b"jpg")
+    assert [(r.buy_qty_read, r.buy_price_read) for r in rows] == [
+        (ordered[short] - 1, catalog.item(short).cost), (None, None), (2.0, 3000)
+    ]  # fmt: skip
+    assert any("사입 칸이 비어 있음" in f for f in rows[1].flags)
+    assert store.sheet_rows(day)[0].raw_buy_price == f"{catalog.item(short).cost:,}"
+
+    finals = {r.idx: (r.item_id_read, r.qty_read) for r in rows}
+    buys = {r.idx: (r.buy_qty_read, r.buy_price_read) for r in rows}
+    service.confirm_sheet(day, finals, 300_000, 500_000, buys)
+    assert store.received(day) == {short: ordered[short] - 1, extra: 2.0}
+    assert store.prices(day) == {short: catalog.item(short).cost, extra: 3000}
+    assert store.sheet_rows(day)[2].buy_qty_final == 2.0
+    expected_total = (ordered[short] - 1) * catalog.item(short).cost + 2 * 3000
+    assert service.revenue(days=1)[-1].purchase == expected_total
+    assert store.last_prices(before=day + timedelta(days=1))[extra] == 3000
+
+    # 이 가게는 사입 칸으로 입고를 기록하므로 따로 고치는 화면·도구는 막는다
+    with pytest.raises(ValueError, match="사입 칸"):
+        service.fix_received(day + timedelta(days=1), {short: 1})

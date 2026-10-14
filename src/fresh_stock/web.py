@@ -23,9 +23,9 @@ from starlette.middleware.sessions import SessionMiddleware
 from .demo import demo_sheet_image
 from .domain import CHANNELS, UNITS, Category
 from .llm import LLMError
-from .recognition import parse_qty
+from .recognition import parse_price, parse_qty
 from .market_calendar import today_kst
-from .service import ORDER, SHEET, StoreService
+from .service import ORDER, SHEET, SIMPLE, STORE_LAYOUT, StoreService
 from .store import OWNER, OWNER_NOTE, STAFF, Database
 
 WEEKDAYS = "월화수목금토일"
@@ -369,6 +369,7 @@ def create_app(
             n_received=sum(1 for q in received.values() if q > 0),
             n_differs=sum(1 for i in ordered.keys() | received.keys() if ordered.get(i, 0) != received.get(i, 0)),
             saved=saved,
+            store_layout=s.service.sheet_layout == STORE_LAYOUT,
         )
 
     def _read(service: StoreService, day: date, image: bytes, media_type: str):
@@ -401,12 +402,12 @@ def create_app(
         request: Request,
         s: Session,
         day: date,
-        entered: dict[int, tuple[str, str]] | None = None,
+        entered: dict[int, tuple[str, str, str, str]] | None = None,
         bad: frozenset[int] = frozenset(),
         error: str = "",
         money: tuple[str, str] = ("", ""),
     ):
-        """재고표 확인 화면. 확정에 실패하면 사람이 입력한 값(entered)을 그대로 다시 보여준다."""
+        """재고표 확인 화면. 확정에 실패하면 사람이 입력한 값(entered: 품목, 재고, 사입 수량, 사입 가격)을 그대로 다시 보여준다."""
         service = s.service
         rows = service.store.sheet_rows(day)
         max_possible, _ = service.sheet_bounds(day)
@@ -424,6 +425,7 @@ def create_app(
             error=error,
             cash=money[0],
             card=money[1],
+            store_layout=service.sheet_layout == STORE_LAYOUT,
         )
 
     @app.get("/sheet/review")
@@ -441,8 +443,12 @@ def create_app(
         _, day = service.status()
         form = await request.form()
         rows = {r.idx: r for r in service.store.sheet_rows(day)}
-        entered: dict[int, tuple[str, str]] = {}
+        entered: dict[int, tuple[str, str, str, str]] = {}
         finals: dict[int, tuple[str | None, float | None]] = {}
+        # 사입 칸이 있는 재고표면 줄마다 사입 수량·가격 (빈 칸은 안 들어온 것)
+        buys: dict[int, tuple[float | None, int | None]] | None = (
+            {} if service.sheet_layout == STORE_LAYOUT else None
+        )
         bad = set()
         for key, value in form.items():
             if not key.startswith("item_"):
@@ -450,13 +456,21 @@ def create_app(
             idx = int(key.removeprefix("item_"))
             item_id = str(value) or None
             qty_text = str(form.get(f"qty_{idx}", "")).strip()
-            entered[idx] = (item_id or "", qty_text)
-            if item_id is None and not qty_text:
+            buy_qty_text = str(form.get(f"buyq_{idx}", "")).strip()
+            buy_price_text = str(form.get(f"buyp_{idx}", "")).strip()
+            entered[idx] = (item_id or "", qty_text, buy_qty_text, buy_price_text)
+            if item_id is None and not qty_text and not buy_qty_text:
                 continue
             qty = parse_qty(qty_text) if qty_text else 0.0
             if item_id is None or qty is None:
                 bad.add(idx)
             finals[idx] = (item_id, qty)
+            if buys is not None:
+                buy_qty = parse_qty(buy_qty_text) if buy_qty_text else None
+                buy_price = parse_price(buy_price_text) if buy_price_text else None
+                if (buy_qty_text and buy_qty is None) or (buy_price_text and buy_price is None):
+                    bad.add(idx)
+                buys[idx] = (buy_qty, buy_price)
         cash_text = str(form.get("cash") or "0").replace(",", "").strip() or "0"
         card_text = str(form.get("card") or "0").replace(",", "").strip() or "0"
         if not (cash_text.isdigit() and card_text.isdigit()):
@@ -466,7 +480,7 @@ def create_app(
             names = [f"{rows[i].raw_name} {rows[i].raw_qty}" if i in rows else "추가한 줄" for i in sorted(bad)]
             error = f"빨간 줄({', '.join(names)})의 품목이나 수량을 확인해 주세요."
             return _review_page(request, s, day, entered, frozenset(bad), error, (cash_text, card_text))
-        service.confirm_sheet(day, finals, int(cash_text), int(card_text))
+        service.confirm_sheet(day, finals, int(cash_text), int(card_text), buys)
         step, _ = service.status()
         return go("/order" if step == ORDER else "/")
 
@@ -573,6 +587,8 @@ def create_app(
         step, day = s.service.status()
         if step != SHEET:
             return go("/")
+        if s.service.sheet_layout == STORE_LAYOUT:
+            return go("/sheet")  # 재고표의 사입 칸으로 입고를 기록한다
         return _received_page(request, s, day)
 
     @app.post("/received")
@@ -582,6 +598,8 @@ def create_app(
         step, day = s.service.status()
         if step != SHEET:
             return go("/")
+        if s.service.sheet_layout == STORE_LAYOUT:
+            return go("/sheet")
         form = await request.form()
         entered = {k: str(v).strip() for k, v in form.items()}
         changes: dict[str, float] = {}
@@ -630,6 +648,8 @@ def create_app(
             closed=set(service.calendar.no_supply_weekdays),
             weekdays=WEEKDAYS,
             knowledge=service.knowledge,
+            sheet_layout=service.sheet_layout,
+            layouts=((SIMPLE, "품목 · 남은 수량"), (STORE_LAYOUT, "품목 · 남은 수량 · 사입 수량 · 사입 가격 (두 묶음)")),
             customized=service.store.catalog() is not None,
             error=error,
             saved=saved,
@@ -749,6 +769,18 @@ def create_app(
         except ValueError as e:
             return go("/settings?" + urlencode({"error": str(e)}))
         return go("/settings?" + urlencode({"saved": "장날·입고 요일을 저장했어요."}))
+
+    @app.post("/settings/sheet-layout")
+    def save_sheet_layout(request: Request, layout: str = Form("")):
+        s = current(request)
+        denied = _owner_only(s)
+        if denied:
+            return denied
+        try:
+            s.service.save_sheet_layout(layout)
+        except ValueError as e:
+            return go("/settings?" + urlencode({"error": str(e)}))
+        return go("/settings?" + urlencode({"saved": "재고표 형식을 저장했어요."}))
 
     @app.post("/settings/knowledge")
     def save_knowledge(request: Request, text: str = Form("")):

@@ -11,7 +11,7 @@ class Category(StrEnum):
 
 
 # 품목 단위. 재고표 수량 칸의 단위 글자("3봉")를 떼고 읽을 수 있는 것만 쓴다 (recognition.UNIT_WORDS)
-UNITS = ("박스", "봉", "개", "판", "팩", "단", "모", "kg")
+UNITS = ("박스", "봉", "망", "개", "판", "팩", "단", "모", "kg")
 # 거래처에 주문하는 방식 (messages.py)
 CHANNELS = ("구매목록", "문자", "전화")
 

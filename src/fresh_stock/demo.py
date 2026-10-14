@@ -12,8 +12,8 @@ from datetime import date, timedelta
 from .catalog import Catalog
 from .market_calendar import MarketCalendar
 from .ordering import SeasonalPolicy
-from .service import StoreService
-from .sheets import render_sheet
+from .service import STORE_LAYOUT, StoreService
+from .sheets import render_sheet, render_store_sheet
 from .simulator import run_simulation
 from .store import OrderLineRecord, OrderPlan, Store
 
@@ -84,5 +84,16 @@ def demo_closing(service: StoreService, day: date, seed: int) -> dict[str, float
 
 
 def demo_sheet_image(service: StoreService, day: date, seed: int) -> bytes:
-    image, _ = render_sheet(service.catalog, day, demo_closing(service, day, seed), seed=seed)
+    """가게 재고표 형식에 맞춘 합성 재고표. 사입 칸이 있으면 그날 입고와 매입가 근처 가격을 적는다."""
+    closing = demo_closing(service, day, seed)
+    if service.sheet_layout != STORE_LAYOUT:
+        image, _ = render_sheet(service.catalog, day, closing, seed=seed)
+        return image
+    rng = random.Random(seed)
+    purchases = {
+        item_id: (qty, round(service.catalog.item(item_id).cost * rng.uniform(0.9, 1.1), -2))
+        for item_id, qty in service.store.received(day).items()
+        if qty > 0 and item_id in {i.id for i in service.catalog.items}
+    }
+    image, _ = render_store_sheet(service.catalog, day, closing, purchases, seed=seed)
     return image

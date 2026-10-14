@@ -84,6 +84,16 @@
   {% if owner %}<button class="btn small">저장</button>{% endif %}
 </form>
 
+<h2>재고표 형식</h2>
+<form method="post" action="/settings/sheet-layout" class="card">
+  {% for value, label in layouts %}
+    <label style="display:block; margin-bottom:6px"><input type="radio" name="layout" value="{{ value }}" {{ 'checked' if value == sheet_layout }} {{ 'disabled' if not owner }}> {{ label }}</label>
+  {% endfor %}
+  <p class="muted">사입 칸이 있으면 AI가 사입 수량·가격까지 읽고, 확정할 때 그날 입고와 사입 가격으로 기록해요.
+    주문했는데 사입 칸이 비었거나, 사입 가격이 최근 가격과 크게 다르면 확인 표시를 붙여요.</p>
+  {% if owner %}<button class="btn small">저장</button>{% endif %}
+</form>
+
 <h2>사장님 경험 노트</h2>
 <form method="post" action="/settings/knowledge" class="card">
   <p class="muted" style="margin-top:0">가게 메모(날씨·명절·TV 방송)가 있을 때 발주 AI가 "평소의 몇 배"를 판단하며 참고하는 경험이에요.

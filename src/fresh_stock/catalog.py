@@ -12,6 +12,7 @@ import io
 from dataclasses import dataclass, replace
 from functools import cached_property
 from importlib import resources
+from importlib.resources.abc import Traversable
 from pathlib import Path
 
 from .domain import Category, Item, Supplier
@@ -66,7 +67,7 @@ class Catalog:
         return replace(self, suppliers=tuple(s for s in self.suppliers if s.id != supplier_id))
 
 
-def _read_rows(path: Path | None, default_name: str) -> list[dict[str, str]]:
+def _read_rows(path: "Path | Traversable | None", default_name: str) -> list[dict[str, str]]:
     if path is not None:
         text = path.read_text(encoding="utf-8-sig")  # 엑셀에서 저장한 CSV는 BOM이 붙는다
     else:
@@ -74,7 +75,9 @@ def _read_rows(path: Path | None, default_name: str) -> list[dict[str, str]]:
     return list(csv.DictReader(text.splitlines()))
 
 
-def load_catalog(items_csv: Path | None = None, suppliers_csv: Path | None = None) -> Catalog:
+def load_catalog(
+    items_csv: "Path | Traversable | None" = None, suppliers_csv: "Path | Traversable | None" = None
+) -> Catalog:
     """CSV에서 품목·거래처를 읽는다. 품목 CSV에 active 열이 있으면 0인 품목은 취급을 그만둔 품목이다."""
     suppliers = tuple(
         Supplier(id=r["id"], name=r["name"], channel=r["channel"])
@@ -98,6 +101,12 @@ def load_catalog(items_csv: Path | None = None, suppliers_csv: Path | None = Non
         )
         (items if (r.get("active") or "1").strip() != "0" else retired).append(item)
     return Catalog(items=tuple(items), suppliers=suppliers, retired=tuple(retired))
+
+
+def sample_store_catalog() -> Catalog:
+    """실제 종이 재고표(과일·야채·건어물·두부·계란 60줄)에 맞춘 예시 가게 목록. 가격은 2026년 도매 시세를 대충 맞춘 값이다."""
+    folder = resources.files("fresh_stock").joinpath("data", "sample_store")
+    return load_catalog(folder.joinpath("items.csv"), folder.joinpath("suppliers.csv"))
 
 
 def catalog_csv(catalog: Catalog) -> tuple[str, str]:

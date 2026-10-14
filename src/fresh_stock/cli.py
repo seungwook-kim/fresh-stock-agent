@@ -18,14 +18,15 @@ from datetime import date, timedelta
 from pathlib import Path
 
 from .agent import AgentPolicy
-from .catalog import load_catalog
+from .catalog import Catalog, load_catalog, sample_store_catalog
 from .llm import LLMClient, make_llm
 from .market_calendar import MarketCalendar, today_kst
 from .messages import LLMGreetingWriter, build_messages
 from .memory import FastEmbedEmbedder, evaluate_retrieval
 from .runtime import memory_bank, service_factory, weather_source
 from .ordering import POLICIES, OrderPolicy, OwnerPolicy, SwitchPolicy
-from .sheet_eval import build_cases, run_eval, summarize
+from .sheet_eval import ReplayLLM, build_cases, build_writer_cases, run_eval, summarize
+from .sheets import WRITERS
 from .sheets import synthetic_aliases
 from .simulator import SimulationResult, Summary, run_simulation
 
@@ -96,9 +97,9 @@ def _agent(policy: OrderPolicy) -> AgentPolicy | None:
     return inner if isinstance(inner, AgentPolicy) else None
 
 
-def _run(args: argparse.Namespace, policy_name: str) -> SimulationResult:
+def _run(args: argparse.Namespace, policy_name: str, catalog: Catalog | None = None) -> SimulationResult:
     return run_simulation(
-        catalog=load_catalog(),
+        catalog=catalog or load_catalog(),
         calendar=MarketCalendar(),
         policy=_make_policy(policy_name, args),
         start=args.start,
@@ -135,18 +136,24 @@ def _print_messages(args: argparse.Namespace) -> None:
 
 
 def _eval_sheets(args: argparse.Namespace) -> None:
-    result = _run(args, "seasonal")
-    cases = build_cases(result, args.n, args.seed, args.store_abbr)
+    if args.writers:
+        _eval_writers(args)
+        return
+    catalog = sample_store_catalog() if args.layout in ("store", "excel") else None
+    result = _run(args, "seasonal", catalog)
+    cases = build_cases(result, args.n, args.seed, args.store_abbr, args.layout)
     if args.dry_run:
         args.out.mkdir(parents=True, exist_ok=True)
         for case in cases:
             (args.out / f"{case.day}.jpg").write_bytes(case.image)
         print(f"재고표 이미지 {len(cases)}장 저장: {args.out.resolve()}")
         return
-    llm = _llm(args)
+    llm = ReplayLLM(args.replay) if args.replay else _llm(args)
     aliases = synthetic_aliases(result.catalog, args.store_abbr) if args.with_aliases else None
-    scores = run_eval(llm, result.catalog, cases, args.out, args.workers, aliases)
-    print(f"합성 재고표 인식 평가 ({args.backend}, 모델 {llm.model}, 추론 강도 {args.effort})\n")
+    scores = run_eval(llm, result.catalog, cases, args.out, args.workers, aliases, args.read_purchases)
+    reader = "사입 칸까지 읽기" if args.read_purchases else "품목·남은 수량만 읽기"
+    source = f"{args.replay.name}의 응답으로 다시 채점" if args.replay else f"{args.backend}, 모델 {llm.model}, 추론 강도 {args.effort}"
+    print(f"합성 재고표 인식 평가 ({args.layout} 형식, {reader}, {source})\n")
     for label, value in summarize(scores).items():
         print(f"{label:<24}{value:.1%}" if isinstance(value, float) else f"{label:<24}{value}")
     calls = llm.calls
@@ -155,6 +162,38 @@ def _eval_sheets(args: argparse.Namespace) -> None:
             f"\nLLM 호출 {len(calls)}회, 평균 {sum(c.seconds for c in calls) / len(calls):.1f}초, "
             f"입력 {sum(c.input_tokens for c in calls):,} / 출력 {sum(c.output_tokens for c in calls):,} 토큰"
         )
+    print(f"장별 결과: {args.out.resolve()}")
+
+
+def _eval_writers(args: argparse.Namespace) -> None:
+    """손글씨가 다른 10명이 엑셀 양식 재고표를 적었을 때의 인식 결과를 사람별로 낸다 (사입 칸까지 읽기)."""
+    result = _run(args, "seasonal", sample_store_catalog())
+    pairs = build_writer_cases(result, args.n, args.seed)
+    if args.dry_run:
+        for writer, case in pairs:
+            folder = args.out / writer.name.replace(" ", "_")
+            folder.mkdir(parents=True, exist_ok=True)
+            (folder / f"{case.day}.jpg").write_bytes(case.image)
+        print(f"재고표 이미지 {len(pairs)}장 저장: {args.out.resolve()}")
+        return
+    llm = ReplayLLM(args.replay) if args.replay else _llm(args)
+    scores = run_eval(llm, result.catalog, [c for _, c in pairs], args.out, args.workers, purchases=True)
+    source = f"{args.replay.name}의 응답으로 다시 채점" if args.replay else f"{args.backend}, 모델 {llm.model}, 추론 강도 {args.effort}"
+    print(f"손글씨 {len(WRITERS)}명 × 재고표 {args.n}장 (엑셀 양식, 사입 칸까지 읽기, {source})\n")
+    head = f"{'쓰는 사람':<10}{'글씨체':<22}{'줄':>5}{'정확도':>9}{'표시 없이 틀림':>12}{'사입 칸':>9}{'맞았는데 표시':>12}"
+    print(head)
+    for writer in WRITERS:
+        mine = [s for (w, _), s in zip(pairs, scores) if w is writer]
+        m = summarize(mine)
+        print(f"{writer.name:<10}{writer.font.removesuffix('-Regular.ttf'):<22}{m['적힌 줄']:>5}{m['줄 정확도']:>9.1%}"
+              f"{m['표시 없이 틀린 줄'] + m.get('사입 칸 표시 없이 틀린 줄', 0):>12}{m.get('사입 칸 정확도', 0):>9.1%}"
+              f"{m['맞았는데 표시된 줄 비율']:>12.1%}")  # fmt: skip
+    print()
+    for label, value in summarize(scores).items():
+        print(f"{label:<24}{value:.1%}" if isinstance(value, float) else f"{label:<24}{value}")
+    calls = llm.calls
+    if calls:
+        print(f"\nLLM 호출 {len(calls)}회, 평균 {sum(c.seconds for c in calls) / len(calls):.1f}초")
     print(f"장별 결과: {args.out.resolve()}")
 
 
@@ -442,6 +481,14 @@ def main() -> None:
     ev.add_argument("--dry-run", action="store_true", help="이미지만 만들고 인식은 하지 않는다")
     ev.add_argument("--with-aliases", action="store_true", help="줄임말을 이미 익힌 상태로 읽는다")
     ev.add_argument("--store-abbr", action="store_true", help="매장 고유 한 글자 약어(양=양배추 등)로 재고표를 쓴다")
+    ev.add_argument(
+        "--layout", choices=["simple", "store", "excel"], default="simple",
+        help="simple: 품목·수량 세 단 / store: 실제 가게 형식 (품목·남은 수량·사입 수량·사입 가격 × 2, 30줄, 예시 가게 60품목)"
+        " / excel: store 칸을 엑셀로 인쇄하고 숫자만 손으로 적어 휴대폰으로 찍은 사진",
+    )  # fmt: skip
+    ev.add_argument("--read-purchases", action="store_true", help="사입 수량·가격 칸이 있는 형식으로 알려주고 함께 읽는다")
+    ev.add_argument("--replay", type=Path, default=None, help="LLM을 부르지 않고 이 호출 기록(JSONL)의 응답으로 다시 채점한다")
+    ev.add_argument("--writers", action="store_true", help="손글씨가 다른 10명이 각자 n장씩 적은 엑셀 양식 재고표로 평가한다")
     _add_sim_args(ev)
 
     srv = sub.add_parser("serve", help="모바일 웹 화면을 띄운다")

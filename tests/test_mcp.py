@@ -169,3 +169,30 @@ def test_settings_changed_elsewhere_are_seen():
     other.set_item_active("apple", False)
     names = {i["name"] for i in call(server, "list_items")["items"]}
     assert "아보카도" in names and "사과" not in names
+
+
+def test_store_layout_sheet_through_mcp(tmp_path):
+    """사입 칸이 있는 재고표: 사입 칸을 확인받아 확정하면 그날 입고와 사입 가격으로 기록된다."""
+    server, db, store_id, day, _ = _setup()
+    StoreService(Store(db, store_id), CATALOG, CALENDAR).save_sheet_layout("store")
+    ordered = Store(db, store_id).received(day)
+    photo = tmp_path / "sheet.jpg"
+    photo.write_bytes(b"\xff\xd8jpg")
+    sheet = call(server, "read_sheet", image_path=str(photo))
+    assert all("buy_qty" in r for r in sheet["rows"])
+    flagged = [r for r in sheet["rows"] if r["needs_check"]]
+    if ordered.get("tomato"):  # 주문했는데 사입 칸이 비어 있으면 확인 표시
+        assert any("사입 칸이 비어 있음" in f for f in sheet["rows"][0]["needs_check"])
+    with pytest.raises(ToolError, match="사입"):
+        call(server, "fix_received", changes={"토마토": 1}, user_confirmed=True)
+
+    corrections = [{"line": 0, "buy_qty": "3", "buy_price": "15,000"}, {"line": 1, "qty": "0", "buy_qty": "2반"}]
+    assert {c["line"] for c in corrections} >= {r["line"] for r in flagged}
+    with pytest.raises(ToolError, match="사입"):
+        call(server, "confirm_sheet", cash=0, card=0, corrections=[*corrections, {"line": 1, "buy_price": "비쌈"}])
+    done = call(server, "confirm_sheet", cash=100000, card=0, corrections=corrections)
+    assert done["received_items"] == 2
+    store = Store(db, store_id)
+    assert store.received(day) == {"tomato": 3.0, "apple": 2.5}
+    assert store.prices(day) == {"tomato": 15000}
+    assert store.closing(day)["tomato"] == 4.5  # 사입 칸만 고친 줄은 읽은 재고를 그대로 쓴다
