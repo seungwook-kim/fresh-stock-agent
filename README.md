@@ -21,12 +21,17 @@
 요구사항은 [docs/PRD.md](docs/PRD.md), 설계는 [docs/SDD.md](docs/SDD.md), 데이터 구조는 [docs/ERD.md](docs/ERD.md)에 있다.
 
 <p>
+<img src="docs/screens/home.png" width="250" alt="홈 화면">
 <img src="docs/screens/review.png" width="250" alt="재고표 확인 화면">
 <img src="docs/screens/order.png" width="250" alt="발주 화면">
-<img src="docs/screens/home.png" width="250" alt="홈 화면">
+</p>
+<p>
+<img src="docs/screens/sheet.png" width="250" alt="재고표 올리기 화면">
+<img src="docs/screens/messages.png" width="250" alt="주문 보내기 화면">
+<img src="docs/screens/logs.png" width="250" alt="AI 기록 화면">
 </p>
 
-왼쪽부터 재고표 확인(확인할 줄만 노란 카드로 맨 위, 품목을 모르는 줄은 빨간색), 발주(AI가 바꾼 품목 가격표 카드, 평소와 크게 다른 입력은 [3로 고치기][33 맞아요]), 홈(지금 할 일 봉투 카드·오늘 순서·가게 메모·매출). 휴대폰 너비 390px.
+윗줄 왼쪽부터 홈(지금 할 일 봉투 카드, 오늘 순서, 가게 메모, 최근 매출), 재고표 확인(확인할 줄만 노란 카드로 맨 위, 품목을 모르는 줄은 빨간색, 재고표에 없는 품목은 [0 맞아요]), 발주(AI가 바꾼 품목은 가격표 카드, 평소와 크게 다른 입력은 [3로 고치기][33 맞아요]). 아랫줄은 재고표 올리기, 주문 보내기(거래처별 주문 쪽지, 보낸 거래처 표시), AI 기록(재고표 읽기 정확도, 익힌 줄임말, 호출 기록). 휴대폰 너비 390px, 데모 데이터.
 
 ## 배경
 
@@ -65,7 +70,7 @@ flowchart LR
 ```bash
 uv sync
 uv run fresh-stock serve --demo --dev-login   # 모바일 웹 (데모 가게에 기록 60일을 넣고 시작, 개발용 로그인). 8799번부터 빈 포트를 찾는다
-uv run pytest                          # 테스트 (PostgreSQL 전용 8개는 FRESH_STOCK_TEST_PG가 있을 때만)
+uv run pytest                          # 테스트 (PostgreSQL 전용 10개는 FRESH_STOCK_TEST_PG가 있을 때만)
 ```
 
 화면의 "합성 재고표로 해보기"를 누르면 오늘 예상 재고로 손글씨 재고표를 만들어 Claude가 읽는다. 홈에서 가게 메모를 추가하면 발주 에이전트가 반영하고, 발주 화면에 참고한 과거 기록이 나온다. 과거 기록 검색용 임베딩 모델(약 0.5GB)은 처음 쓸 때 `.cache/models`에 받는다. 받지 않으려면 `--no-rag`.
@@ -85,6 +90,20 @@ uv run fresh-stock messages --date 2026-09-21 --start 2026-08-20 --llm      # �
 uv run fresh-stock simulate --policy seasonal --out out/                    # 가상 매장 기록을 CSV로
 ```
 
+### 휴대폰이나 다른 사람에게 보여 주기 (Tailscale)
+
+내 PC에서 띄운 서버를 [Tailscale Funnel](https://tailscale.com/kb/1223/funnel)로 https 주소에 연결하면, 테일스케일이 없는 휴대폰이나 다른 사람도 주소만으로 들어온다.
+
+```bash
+uv run fresh-stock serve --demo --dev-login --port 8800
+tailscale funnel --bg --https=8443 http://127.0.0.1:8800   # https://<기기 이름>.<tailnet>.ts.net:8443/
+tailscale funnel --https=8443 off                          # 다 보여 줬으면 닫는다
+```
+
+- 개발용 로그인을 켠 채로 열면 주소를 아는 사람은 아무 이메일로나 들어와 데모 가게의 사장님이 된다. 잠깐 보여 줄 때만 쓰고, 오래 열어 둘 거면 구글 로그인을 설정하고 `--dev-login`을 뺀다.
+- 들어온 사람이 재고표 읽기·발주 추천·메모 확인을 누르면 서버를 띄운 PC의 Claude 계정으로 AI가 돈다.
+- 테일넷 안에서만 열려면 `funnel` 대신 `tailscale serve`를 쓴다.
+
 ### 저장소 (SQLite / Supabase)
 
 기본은 SQLite 파일(`out/store.db`)이다. PostgreSQL(Supabase 등) 주소를 주면 같은 코드로 PostgreSQL을 쓴다. SQL은 두 DB에서 모두 도는 문법만 쓰고, 원격 DB에서는 연결 풀로 끊긴 연결을 다시 잇는다.
@@ -95,7 +114,7 @@ uv run fresh-stock copy-db out/store.db "postgresql://..."   # 지금까지 SQLi
 uv run fresh-stock serve               # .env의 FRESH_STOCK_DB로 뜬다 (화면 출력에서 비밀번호는 가림)
 ```
 
-PostgreSQL에서도 저장소 테스트를 돌릴 수 있다: `FRESH_STOCK_TEST_PG=postgresql://... uv run pytest`. 로컬 PostgreSQL 16으로 전체 테스트 110개와 웹 하루 흐름(재고표 읽기 → 확정 → 과거 기록 검색이 들어간 발주 → 승인 → 문자)을 확인했다.
+PostgreSQL에서도 저장소 테스트를 돌릴 수 있다: `FRESH_STOCK_TEST_PG=postgresql://... uv run pytest`. 로컬 PostgreSQL 16으로 저장소 테스트와 웹 하루 흐름(재고표 읽기 → 확정 → 과거 기록 검색이 들어간 발주 → 승인 → 문자)을 확인했다.
 
 ### LLM 백엔드
 
@@ -117,7 +136,8 @@ PostgreSQL에서도 저장소 테스트를 돌릴 수 있다: `FRESH_STOCK_TEST_
 | `ordering.py` | 규칙 기반 발주(기존 방식, 요일·장날 보정), 입력 실수 가드레일 |
 | `accounting.py` | 재고로 판매량 역산, 떨이 양 추정 |
 | `messages.py` | 거래처별 문자(한 줄), 전화 메모, 가락시장 구매 목록 |
-| `service.py`, `store.py`, `web.py` | 하루 업무 흐름과 가게 설정, SQLite·PostgreSQL 저장(가게별), 구글 로그인과 모바일 웹 (FastAPI + Jinja) |
+| `service.py`, `store.py` | 하루 업무 흐름과 가게 설정, SQLite·PostgreSQL 저장(가게별) |
+| `web.py`, `templates/`, `static/`, `visuals.py` | 구글 로그인과 모바일 웹 (FastAPI + Jinja), 화면 디자인(CSS·글꼴·그림), 품목 이름으로 그림 고르기 |
 | `catalog.py` | 품목·거래처 목록: 기본 목록, 취급을 그만둔 품목(지난 기록용), CSV 내보내기·가져오기 |
 | `simulator.py`, `events.py` | 가상 매장: 요일·장날·신선도·떨이·품절, 비 예보·추석·TV 방송 |
 | `sheets.py`, `sheet_eval.py` | 합성 손글씨 재고표 생성과 인식 평가 |
@@ -172,7 +192,7 @@ uv run fresh-stock import-catalog --store 1 out/catalog/items.csv out/catalog/su
 
 ## 화면 디자인
 
-마감 뒤 지친 상태로 휴대폰 한 손에 쓰는 화면이라, 색은 뜻이 하나씩만 있게 정했다 (디자인 회의 결정).
+마감 뒤 지친 상태로 휴대폰 한 손에 쓰는 화면이라, 색은 뜻이 하나씩만 있게 정했다 ([PRD 8.2](docs/PRD.md#82-디자인-규칙)).
 
 | 색 | 뜻 | 쓰는 곳 |
 |---|---|---|
@@ -184,6 +204,7 @@ uv run fresh-stock import-catalog --store 1 out/catalog/items.csv out/catalog/su
 - 홈 맨 위 **봉투 카드**에 지금 할 일 하나와 버튼 하나 (재고표 찍기 → 노란 줄 고치기 → 발주 확인 → 문자 보내기)
 - 수량 칸은 정수 + [반] 칩 (4반 = 4.5), 금액 칸은 쉼표가 저절로 붙는다. 누르는 곳은 48px 이상, 아래 고정 버튼 56px
 - 재고표 확인은 노란·빨간 줄과 "재고표에 없는 품목"(어제 재고가 남았는데 안 적힌 품목, [0 맞아요])을 맨 위 카드로, 나머지는 종이 순서 그대로 아래에 두고 누르면 그 줄을 고친다. 남은 노란 줄 수가 아래 막대에 보이고, 다 확인해야 확정 버튼이 나온다 (서버도 같은 규칙으로 막는다)
+- 끝자리를 두 번 읽은 것 같은 값(88)에는 [8로 고치기]를 내준다 (고친 값도 가능한 양을 넘으면 내지 않는다). 빨간 줄의 품목 고르기 맨 위에는 적힌 이름과 비슷한 품목을 2~3개 보여 준다 (자모로 비교해 `굴` → 귤). 노란 줄이 7개 넘는 날은 화면이 온통 노랗지 않게 카드 바탕만 옅게 한다
 - 거래처 문자는 주문 쪽지 모양. 거래처 전화번호를 넣어 두면 [문자 보내기]·[전화 걸기]가 바로 열리고, 누른 거래처는 "보냈어요 시각"으로 남는다
 - 품목·설정에서 인쇄용 빈 재고표(품목 이름이 찍힌 두 묶음 표)를 받을 수 있다
 
