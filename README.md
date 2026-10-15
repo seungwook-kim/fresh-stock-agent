@@ -18,6 +18,8 @@
 
 모든 수치는 가상 매장과 합성 재고표 기준이며 실제 매장 성과가 아니다. 가정과 한계는 아래에 적었다.
 
+요구사항은 [docs/PRD.md](docs/PRD.md), 설계는 [docs/SDD.md](docs/SDD.md), 데이터 구조는 [docs/ERD.md](docs/ERD.md)에 있다.
+
 <p>
 <img src="docs/screens/review.png" width="250" alt="재고표 확인 화면">
 <img src="docs/screens/order.png" width="250" alt="발주 화면">
