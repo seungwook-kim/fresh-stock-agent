@@ -1,73 +1,96 @@
 {% extends "base.html" %}
-{% set active = "order" %}
+{% import "_ui.html" as ui %}
 {% block title %}발주{% endblock %}
-{% block content %}
-<h1>{{ plan.arrival | day }} 입고분 발주</h1>
-<p class="muted" style="margin-top:-6px">{{ day | day }} 마감 재고 기준 · 버틸 날 {{ plan.arrival | day }}{% if notes %} · 메모 {{ notes | length }}일{% endif %}</p>
 
-{% if notes %}
-<div class="note">
-  <b>가게 메모</b>
-  {% for d, texts in notes | dictsort %}{% for t in texts %}<div>{{ d | day }} {{ t }}</div>{% endfor %}{% endfor %}
+{% macro orow(ln) -%}
+{%- set item = catalog.item(ln.item_id) -%}
+<div class="orow{{ ' chg' if ln.recommended != ln.base }}">
+  <span class="nm">{{ item.name }} <span class="unit">{{ item.unit }}</span>
+    {% if ln.recommended != ln.base %}<span class="badge ai">AI 추천 {{ ln.base }}→{{ ln.recommended }}</span>{% endif %}</span>
+  <span class="v">{{ stock.get(ln.item_id, 0) | qty }}</span>
+  <span class="v">{{ ln.recommended }}</span>
+  <span class="field-num"><input name="final_{{ ln.item_id }}" value="{{ entered.get(ln.item_id, ln.final) }}" inputmode="numeric" aria-label="{{ item.name }} 발주" autocomplete="off"></span>
 </div>
-{% endif %}
-{% if similar %}
-<details class="card"><summary><b>참고한 과거 기록</b> <span class="muted">· 오늘 메모와 비슷한 날 {{ similar | length }}개</span></summary>
-  {% for text in similar %}<pre class="msg" style="margin-top:8px">{{ text }}</pre>{% endfor %}
-</details>
-{% endif %}
-{% if researched %}
-<details class="card" open><summary><b>AI가 확인한 메모</b> <span class="muted">· {{ researched | length }}개</span></summary>
-  {% for n in researched %}
-    <div style="margin-top:8px"><b>{{ n.day | day }}</b> {{ n.text }}<br>
-      <span class="{{ 'reason' if n.research.confirmed else 'flags' }}">{{ 'AI 확인' if n.research.confirmed else 'AI가 확인하지 못함' }}: {{ n.research.summary }}</span>
-      {% for title, url in n.research.sources %}<br><a href="{{ url }}" target="_blank" rel="noopener">{{ title }}</a>{% endfor %}
-    </div>
-  {% endfor %}
-</details>
-{% endif %}
-<div class="card"><b>발주 에이전트</b><div>{{ plan.summary }}</div>
-  <div class="muted" style="margin-top:6px">
-    {% if changed %}평소 추천에서 수량이 바뀐 품목:
-      {% for ln in changed %}{{ catalog.item(ln.item_id).name }} {{ ln.base }} → {{ ln.recommended }}{{ ', ' if not loop.last }}{% endfor %}
-    {% else %}평소 추천에서 수량이 바뀐 품목은 없어요.{% endif %}
+{%- endmacro %}
+
+{% macro warn_row(ln) -%}
+{%- set item = catalog.item(ln.item_id) -%}{%- set q = entered.get(ln.item_id, ln.final) -%}
+<div class="fixrow in-list" id="w-{{ ln.item_id }}">
+  <div class="read"><span class="nm-b">{{ item.name }} <span class="unit">{{ item.unit }}</span></span><span class="badge check">확인</span><span class="done-mark">✓ 확인함</span>
+    <span class="why">{{ warnings[ln.item_id] }}</span></div>
+  <div class="vs">추천 <b>{{ ln.recommended }}</b> · 입력 <b class="big">{{ q }}</b> · 남음 {{ stock.get(ln.item_id, 0) | qty }}</div>
+  <div class="edit two">
+    <button class="btn main" name="fix" value="{{ ln.item_id }}:{{ ln.recommended }}">{{ ln.recommended }}로 고치기</button>
+    <label class="chip-ok"><input type="checkbox" name="ok_{{ ln.item_id }}" value="{{ q }}" {{ 'checked' if ln.item_id in accepted }}>{{ q }} 맞아요</label>
   </div>
+  <div class="edit" style="grid-template-columns:auto 1fr"><span class="lbl">다른 수량</span>
+    <span class="field-num"><input name="final_{{ ln.item_id }}" value="{{ q }}" inputmode="numeric" aria-label="{{ item.name }} 발주" autocomplete="off"></span></div>
 </div>
+{%- endmacro %}
 
-{% if warnings %}
-<div class="alert">
-  <b>확인이 필요한 수량이 {{ warnings | length }}개 있어요.</b> 빨간 줄을 확인하고, 맞으면 아래 체크 후 승인해 주세요.
-</div>
-{% endif %}
+{% block page %}
+<form method="post" action="/order" class="screen-form review-form" id="order">
+  {# 엔터를 누르면 승인 (첫 번째 제출 버튼이 기본이라 고치기 버튼보다 앞에 둔다) #}
+  <button class="sr" tabindex="-1" aria-hidden="true">승인</button>
+  {{ ui.top(store_name, (plan.arrival | day) ~ " 입고", "/", late) }}
+  <main class="body">
+    <h1 class="title">{{ plan.arrival | day }} 입고분 발주</h1>
+    <p class="sub">{{ day | day }} 마감 재고 기준 · 거래처 {{ n_suppliers }}곳 · 품목 {{ n_items }}개</p>
+    {% if error %}<div class="alert err">{{ error }}</div>{% endif %}
+    {% if warnings %}<div class="alert check">입력한 수량 중 <b>{{ warnings | length }}개</b>가 평소와 크게 달라요. 노란 줄을 확인해 주세요.</div>{% endif %}
+    <div class="ai-says"><b class="who">AI 추천 · 발주 도우미</b>{{ plan.summary }}</div>
 
-<form method="post" action="/order">
-{% for supplier, lines in groups %}
-  <h2>{{ supplier.name }} <span class="muted">· {{ supplier.channel }}</span></h2>
-  <div class="card" style="padding:6px 8px">
-    <table>
-      <colgroup><col><col class="num-col"><col class="num-col"><col class="qty-col"></colgroup>
-      <tr><th>품목</th><th class="num">재고</th><th class="num">추천</th><th class="num">발주</th></tr>
-      {% for ln in lines %}
-        {% set item = catalog.item(ln.item_id) %}
-        <tr class="{{ 'warn' if ln.item_id in warnings }}">
-          <td>{{ item.name }} <span class="muted">{{ item.unit }}</span>
-            {# 분류 단위 조정은 여러 줄에 같은 이유가 붙으므로, 수량이 실제로 바뀐 줄에만 이유를 보여준다 #}
-            {% if ln.reason and ln.recommended != ln.base %}<div class="reason">규칙 {{ ln.base }} → {{ ln.recommended }} · 수요 {{ ln.factors }}<br>{{ ln.reason }}</div>{% endif %}
-            {% if ln.item_id in warnings %}<div class="warning">{{ warnings[ln.item_id] }}</div>{% endif %}</td>
-          <td class="num">{{ '%g' % stock.get(ln.item_id, 0) }}</td>
-          <td class="num">{{ ln.recommended }}</td>
-          <td class="num"><input class="qty" name="final_{{ ln.item_id }}" inputmode="numeric" value="{{ entered.get(ln.item_id, ln.final) }}"></td>
-        </tr>
+    {% if changed %}
+      <h2 class="sec">평소와 바뀐 품목 <small>{{ changed | length }}개</small></h2>
+      {% for ln in changed %}{% set item = catalog.item(ln.item_id) %}
+        <div class="tagcard">{% set p = item_pic(item) %}{% if p.src %}<img src="{{ p.src }}" alt="" width="32" height="32">{% else %}<span class="sq {{ p.sq }}"></span>{% endif %}
+          <span class="nm">{{ item.name }} <span class="unit">{{ item.unit }}</span></span>
+          <span class="chg"><span class="was">{{ ln.base }} →</span> {{ ln.recommended }}</span>
+          <span class="why"><span class="badge ai">AI 추천</span> {{ ln.reason or '가게 메모 반영' }}{% if ln.factors %} <span class="muted">· 수요 {{ ln.factors }}</span>{% endif %}</span></div>
       {% endfor %}
-    </table>
+    {% endif %}
+
+    {% for supplier, shown, zero in groups %}
+      <h2 class="sec">{{ supplier.name }} <small>{{ supplier.channel }}{% if supplier.phone %} · {{ supplier.phone }}{% endif %}</small></h2>
+      <div class="card flat">
+        <div class="olist">
+          <div class="oh"><span>품목</span><span class="r">남음</span><span class="r">추천</span><span class="r">발주</span></div>
+          {% for ln in shown %}{% if ln.item_id in warnings %}{{ warn_row(ln) }}{% else %}{{ orow(ln) }}{% endif %}{% endfor %}
+          {% if zero %}
+            <details class="zero-lines"><summary>추천 0인 품목 {{ zero | length }}개</summary>
+              {% for ln in zero %}{{ orow(ln) }}{% endfor %}
+            </details>
+          {% endif %}
+        </div>
+      </div>
+    {% endfor %}
+
+    {% if notes %}
+      <details class="card"><summary><b>참고한 가게 메모</b> <span class="muted">· {{ notes | length }}일</span></summary>
+        {% for d, texts in notes | dictsort %}{% for t in texts %}<p style="margin:6px 0"><b>{{ d | day }}</b> {{ t }}</p>{% endfor %}{% endfor %}
+      </details>
+    {% endif %}
+    {% if researched %}
+      <details class="card" open><summary><b>AI가 확인한 메모</b> <span class="muted">· {{ researched | length }}개</span></summary>
+        {% for n in researched %}
+          <p style="margin:8px 0"><span class="badge ai">AI 검색</span> <b>{{ n.text }}</b><br>
+            {{ 'AI 확인' if n.research.confirmed else 'AI가 확인하지 못함' }}: {{ n.research.summary }}
+            {% for title, url in n.research.sources %}<br><a href="{{ url }}" target="_blank" rel="noopener">{{ title }}</a>{% endfor %}</p>
+        {% endfor %}
+      </details>
+    {% endif %}
+    {% if similar %}
+      <details class="card"><summary><b>참고한 과거 기록</b> <span class="muted">· 비슷한 날 {{ similar | length }}개</span></summary>
+        {% for text in similar %}<pre class="raw" style="margin:8px 0">{{ text }}</pre>{% endfor %}
+      </details>
+    {% endif %}
+    <button class="btn ghost block" formaction="/order/refresh" formnovalidate data-loading="발주 추천 다시 만드는 중" data-loading-sub="메모가 있으면 AI가 확인하느라 1~3분" data-steps="{{ order_steps }}">메모 반영해서 추천 다시 만들기</button>
+  </main>
+  <div class="bar-action">
+    <div class="sum"><span class="left"><span class="left-count"></span></span><span>거래처 {{ n_suppliers }}곳 · 품목 {{ n_items }}개</span></div>
+    {% set first_warn = warnings | list | first %}
+    <a class="btn go go-left" href="#w-{{ first_warn }}">확인할 숫자로 ↑</a>
+    <button class="btn main confirm">승인하고 주문 문자 만들기</button>
   </div>
-{% endfor %}
-{% if warnings %}
-  <label class="card" style="display:block"><input type="checkbox" name="confirmed" value="yes"> 빨간 줄 수량을 확인했고 이대로 발주합니다</label>
-{% endif %}
-<button class="btn block">발주 승인하고 거래처 문자 만들기</button>
-</form>
-<form method="post" action="/order/refresh" style="margin-top:10px" data-loading="발주 추천을 다시 만드는 중이에요.">
-  <button class="btn secondary block">메모 반영해서 추천 다시 만들기</button>
 </form>
 {% endblock %}

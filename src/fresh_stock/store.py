@@ -105,7 +105,13 @@ CREATE TABLE IF NOT EXISTS sheet_row (
 CREATE TABLE IF NOT EXISTS catalog_supplier (
     store_id INTEGER NOT NULL, id TEXT NOT NULL, pos INTEGER NOT NULL,
     name TEXT NOT NULL, channel TEXT NOT NULL,
+    phone TEXT NOT NULL DEFAULT '',
     PRIMARY KEY (store_id, id)
+);
+CREATE TABLE IF NOT EXISTS message_sent (
+    -- 거래처 문자·전화 버튼을 누른 시각 (주문을 두 번 보내지 않게 화면에 표시)
+    store_id INTEGER NOT NULL, order_day TEXT NOT NULL, supplier_id TEXT NOT NULL, sent_at TEXT NOT NULL,
+    PRIMARY KEY (store_id, order_day, supplier_id)
 );
 CREATE TABLE IF NOT EXISTS catalog_item (
     store_id INTEGER NOT NULL, id TEXT NOT NULL, pos INTEGER NOT NULL,
@@ -151,7 +157,8 @@ TABLES = {
         "store_id", "day", "idx", "raw_name", "raw_qty", "item_id_read", "qty_read", "flags", "item_id_final",
         "qty_final",
     ),
-    "catalog_supplier": ("store_id", "id", "pos", "name", "channel"),
+    "catalog_supplier": ("store_id", "id", "pos", "name", "channel", "phone"),
+    "message_sent": ("store_id", "order_day", "supplier_id", "sent_at"),
     "catalog_item": (
         "store_id", "id", "pos", "name", "category", "unit", "supplier_id", "base_demand", "price", "cost",
         "shelf_life", "active",
@@ -312,6 +319,19 @@ class Database:
                 "INSERT INTO meta (key, value) VALUES ('schema_version', ?) ON CONFLICT (key) DO NOTHING",
                 (SCHEMA_VERSION,),
             )
+        self._add_missing_columns()
+
+    # 나중에 생긴 열: 이미 만들어진 DB에는 CREATE TABLE IF NOT EXISTS가 열을 더하지 않는다
+    ADDED_COLUMNS = (("catalog_supplier", "phone", "TEXT NOT NULL DEFAULT ''"),)
+
+    def _add_missing_columns(self) -> None:
+        for table, column, ddl in self.ADDED_COLUMNS:
+            try:
+                with self.tx() as tx:  # PostgreSQL은 실패한 트랜잭션을 더 못 쓰므로 확인은 따로
+                    tx.one(f"SELECT {column} FROM {table} LIMIT 1")
+            except Exception:
+                with self.tx() as tx:
+                    tx.execute(f"ALTER TABLE {table} ADD COLUMN {column} {ddl}")
 
     def _check_old_schema(self) -> None:
         """가게 구분이 없던 예전 DB면 알아보기 쉬운 오류를 낸다."""
@@ -355,6 +375,10 @@ class Database:
         with self.tx() as tx:
             row = tx.one("SELECT name FROM stores WHERE id = ?", (store_id,))
         return row[0] if row else None
+
+    def rename_store(self, store_id: int, name: str) -> None:
+        with self.tx() as tx:
+            tx.execute("UPDATE stores SET name = ? WHERE id = ?", (name.strip(), store_id))
 
     def store_ids(self) -> list[int]:
         with self.tx() as tx:
@@ -782,7 +806,9 @@ class Store:
         """이 가게의 품목·거래처. 아직 고친 적이 없으면 None이고, 그동안은 기본 목록을 쓴다."""
         s = (self.store_id,)
         with self._tx() as tx:
-            suppliers = tx.all("SELECT id, name, channel FROM catalog_supplier WHERE store_id = ? ORDER BY pos", s)
+            suppliers = tx.all(
+                "SELECT id, name, channel, phone FROM catalog_supplier WHERE store_id = ? ORDER BY pos", s
+            )
             rows = tx.all(
                 "SELECT id, name, category, unit, supplier_id, base_demand, price, cost, shelf_life, active"
                 " FROM catalog_item WHERE store_id = ? ORDER BY pos",
@@ -803,8 +829,8 @@ class Store:
             tx.execute("DELETE FROM catalog_supplier WHERE store_id = ?", (s,))
             tx.execute("DELETE FROM catalog_item WHERE store_id = ?", (s,))
             tx.executemany(
-                "INSERT INTO catalog_supplier (store_id, id, pos, name, channel) VALUES (?, ?, ?, ?, ?)",
-                [(s, sup.id, n, sup.name, sup.channel) for n, sup in enumerate(catalog.suppliers)],
+                "INSERT INTO catalog_supplier (store_id, id, pos, name, channel, phone) VALUES (?, ?, ?, ?, ?, ?)",
+                [(s, sup.id, n, sup.name, sup.channel, sup.phone) for n, sup in enumerate(catalog.suppliers)],
             )
             rows = [
                 (s, i.id, n, i.name, i.category.value, i.unit, i.supplier_id, i.base_demand, i.price, i.cost,
@@ -815,6 +841,24 @@ class Store:
                 "INSERT INTO catalog_item (store_id, id, pos, name, category, unit, supplier_id, base_demand, price,"
                 " cost, shelf_life, active) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 rows,
+            )
+
+    def mark_sent(self, order_day: date, supplier_id: str) -> None:
+        with self._tx() as tx:
+            tx.execute(
+                "INSERT INTO message_sent (store_id, order_day, supplier_id, sent_at) VALUES (?, ?, ?, ?)"
+                " ON CONFLICT (store_id, order_day, supplier_id) DO UPDATE SET sent_at = excluded.sent_at",
+                (self.store_id, order_day.isoformat(), supplier_id, _now()),
+            )
+
+    def sent(self, order_day: date) -> dict[str, str]:
+        """거래처 id → 문자·전화 버튼을 누른 시각 (ISO)."""
+        with self._tx() as tx:
+            return dict(
+                tx.all(
+                    "SELECT supplier_id, sent_at FROM message_sent WHERE store_id = ? AND order_day = ?",
+                    (self.store_id, order_day.isoformat()),
+                )
             )
 
     def settings(self) -> dict[str, str]:

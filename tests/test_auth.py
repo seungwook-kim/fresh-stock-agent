@@ -17,8 +17,9 @@ def test_pages_require_login():
 def test_member_lands_on_their_store():
     env = WebEnv()
     r = env.login()
-    assert "싱싱청과" in r.text and "차례예요" in r.text
-    assert "boss@gmail.com" in r.text and "로그아웃" in r.text
+    assert "싱싱청과" in r.text and "찍어 올릴 차례" in r.text
+    more = env.client.get("/more").text  # 계정과 로그아웃은 더보기에
+    assert "boss@gmail.com" in more and "로그아웃" in more
 
 
 def test_new_user_without_store_creates_one_and_is_isolated():
@@ -72,7 +73,7 @@ def test_multiple_stores_choose_on_login():
     env = WebEnv()
     second = env.db.create_store("2호점", OWNER_EMAIL)
     r = env.login()
-    assert "가게 선택" in r.text and "2호점" in r.text
+    assert "가게 고르기" in r.text and "2호점" in r.text
     r = env.client.post(f"/stores/{second}/select", follow_redirects=True)
     assert "2호점" in r.text
 

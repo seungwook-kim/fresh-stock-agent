@@ -1,107 +1,117 @@
-<!doctype html>
+{% import "_ui.html" as ui %}<!doctype html>
 <html lang="ko">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#1f4d2b">
 <title>{% block title %}fresh-stock{% endblock %}{% if store_name %} · {{ store_name }}{% endif %}</title>
-<style>
-  :root {
-    --bg: #f6f5f1; --card: #ffffff; --ink: #1d1f1c; --muted: #6b6f68; --line: #e3e1da;
-    --accent: #2f6b3a; --accent-ink: #ffffff; --flag: #fff3c4; --flag-line: #e7c95a;
-    --warn: #fde7e4; --warn-ink: #9b2c1f; --agent: #e8f1ea;
-  }
-  * { box-sizing: border-box; }
-  body { margin: 0; background: var(--bg); color: var(--ink);
-         font: 16px/1.5 -apple-system, "Apple SD Gothic Neo", "Malgun Gothic", "Noto Sans KR", sans-serif; }
-  header { background: var(--accent); color: var(--accent-ink); padding: 12px 16px; }
-  header a { color: inherit; text-decoration: none; }
-  header .brand { font-weight: 700; }
-  nav { display: flex; gap: 4px; overflow-x: auto; padding: 8px 12px; background: var(--card);
-        border-bottom: 1px solid var(--line); }
-  nav a { padding: 6px 12px; border-radius: 999px; color: var(--ink); text-decoration: none; white-space: nowrap; }
-  nav a.on { background: var(--agent); font-weight: 600; }
-  main { max-width: 760px; margin: 0 auto; padding: 16px; }
-  h1 { font-size: 1.3rem; margin: 4px 0 12px; }
-  h2 { font-size: 1.05rem; margin: 20px 0 8px; }
-  .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; margin-bottom: 12px; }
-  .muted { color: var(--muted); font-size: .9rem; }
-  .btn { display: inline-block; border: 0; border-radius: 10px; padding: 12px 18px; font: inherit; font-weight: 600;
-         background: var(--accent); color: var(--accent-ink); text-decoration: none; cursor: pointer; }
-  .btn.secondary { background: var(--card); color: var(--ink); border: 1px solid var(--line); }
-  .btn.small { padding: 6px 12px; font-size: .9rem; }
-  .btn.block { display: block; width: 100%; text-align: center; }
-  .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
-  input, select, textarea { font: inherit; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: #fff; }
-  /* 휴대폰 너비에서 입력칸이 화면 밖으로 밀리지 않게 열 너비를 고정하고 긴 글자는 줄바꿈한다 */
-  table { width: 100%; border-collapse: collapse; table-layout: fixed; }
-  th, td { padding: 8px 6px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top;
-           overflow-wrap: anywhere; }
-  td select { width: 100%; padding: 8px 4px; }
-  col.qty-col { width: 4.6em; }
-  col.num-col { width: 3.4em; }
-  col.item-col { width: 42%; }
-  th { font-size: .85rem; color: var(--muted); font-weight: 600; }
-  td.num, th.num { text-align: right; white-space: nowrap; }
-  tr.flag td { background: var(--flag); }
-  tr.warn td { background: var(--warn); }
-  .flags { font-size: .82rem; color: #7a5c00; }
-  .warning { font-size: .85rem; color: var(--warn-ink); }
-  .reason { font-size: .82rem; color: var(--accent); }
-  .alert { background: var(--warn); color: var(--warn-ink); border-radius: 10px; padding: 10px 14px; margin-bottom: 12px; }
-  .note { background: var(--agent); border-radius: 10px; padding: 10px 14px; margin-bottom: 12px; }
-  .qty { width: 100%; text-align: right; padding: 8px 6px; }
-  pre.msg { white-space: pre-wrap; font: inherit; margin: 0; background: #faf9f6; border: 1px solid var(--line);
-            border-radius: 8px; padding: 10px 12px; }
-  img.sheet { width: 100%; border-radius: 8px; border: 1px solid var(--line); }
-  #loading { display: none; position: fixed; inset: 0; background: rgba(20, 24, 20, .55); color: #fff;
-             align-items: center; justify-content: center; text-align: center; padding: 24px; font-size: 1.05rem; z-index: 10; }
-  #loading.on { display: flex; }
-</style>
+<link rel="stylesheet" href="/static/fonts/pretendard/pretendard-subset.css">
+<link rel="stylesheet" href="/static/app.css">
 </head>
-<body>
-<header class="row" style="justify-content:space-between">
-  <span><a class="brand" href="/">fresh-stock</a>{% if store_name %} <span style="color:#d8e6da">· {{ store_name }}</span>{% endif %}</span>
-  {% if user %}<span style="font-size:.85rem; color:#d8e6da">{{ user }} · <a href="/logout">로그아웃</a></span>{% endif %}
-</header>
-{% if store_name %}
-<nav>
-  <a href="/" class="{{ 'on' if active == 'home' }}">홈</a>
-  <a href="/sheet" class="{{ 'on' if active == 'sheet' }}">마감 재고표</a>
-  {% if step == 'order' %}<a href="/order" data-loading="발주 추천을 만드는 중이에요. 확인하지 않은 메모가 있으면 AI가 확인하느라 1~3분 걸려요." class="{{ 'on' if active == 'order' }}">발주</a>{% endif %}
-  <a href="/logs" class="{{ 'on' if active == 'logs' }}">AI 기록</a>
-  <a href="/settings" class="{{ 'on' if active == 'settings' }}">품목·설정</a>
-  <a href="/members" class="{{ 'on' if active == 'members' }}">가게 관리</a>
-</nav>
-{% endif %}
-<main>
-{% if status_day and today and status_day < today %}
-  <div class="alert">
-    {% if step == "sheet" %}
-      지금 할 일이 <b>{{ status_day | day }} 마감 재고표</b>예요 (오늘은 {{ today | day }}).
-      그날 가게를 쉬었다면 건너뛰어 주세요. 그대로 올리면 오늘 재고표가 {{ status_day | day }} 기록으로 저장돼요.
-    {% else %}
-      <b>{{ status_day | day }} 발주</b>를 승인하지 않은 채 날짜가 지났어요 (오늘은 {{ today | day }}).
-      실제로 주문했다면 발주 화면에서 그 수량으로 승인하고, 주문하지 않았다면 건너뛰어 주세요.
-    {% endif %}
-    <form method="post" action="/skip" style="margin-top:8px">
-      <button class="btn small secondary">{{ status_day | day }} {{ "쉬는 날로" if step == "sheet" else "발주 없이" }} 건너뛰기</button>
-    </form>
+<body class="app">
+{% include "_sprite.html" %}
+<div class="shell">
+{% block page %}
+  {# 날짜 칩: 오늘. 밀린 일이 있으면 그 날짜를 빨간 테두리로 #}
+  {{ ui.top(store_name, chip if chip is defined else (((status_day if late else today) | day) if status_day else ""), back if back is defined else "", late) }}
+  <main class="body">
+  {% if store_name and late and show_late is not defined %}
+    <div class="alert err">
+      {% if step == "sheet" %}
+        지금 할 일이 <b>{{ status_day | day }} 마감 재고표</b>예요 (오늘 {{ today | day }}).
+        그날 가게를 쉬었다면 건너뛰어 주세요. 그대로 올리면 오늘 재고표가 {{ status_day | day }} 기록으로 저장돼요.
+      {% else %}
+        <b>{{ status_day | day }} 발주</b>를 승인하지 않은 채 날짜가 지났어요 (오늘 {{ today | day }}).
+        실제로 주문했다면 그 수량으로 승인하고, 주문하지 않았다면 건너뛰어 주세요.
+      {% endif %}
+      <form method="post" action="/skip"><button class="btn line small">{{ status_day | day }} {{ "쉬는 날로" if step == "sheet" else "발주 없이" }} 건너뛰기</button></form>
+    </div>
+  {% endif %}
+  {% block content %}{% endblock %}
+  </main>
+  {% if store_name %}{{ ui.tabbar(active if active is defined else "") }}{% endif %}
+{% endblock %}
+</div>
+
+{# 기다림 화면: AI가 읽거나 추천을 만드는 동안 덮는다 (봉투 카드) #}
+<div id="loading" role="status" aria-live="polite">
+  <div class="wrap">
+    <section class="bag wait">
+      <span class="fold" aria-hidden="true"></span>
+      <div class="day">처리하는 중</div>
+      <div class="what"></div>
+      <div class="photo-prev" hidden role="img" aria-label="고른 재고표 사진"><span>고른 사진</span></div>
+      <div class="scale" aria-hidden="true"><img src="/static/produce/basket.svg" alt=""><img src="/static/produce/leafy-green.svg" alt=""><img src="/static/produce/apple.svg" alt=""></div>
+      <ol class="progress-steps"></ol>
+    </section>
+    <div class="card">
+      <b style="font-size:18px">이 화면 닫아도 돼요.</b>
+      <p style="margin:6px 0 0">다 되면 홈 맨 위 봉투에 다음 할 일로 떠요. 그동안 가게 정리하세요.</p>
+    </div>
   </div>
-{% endif %}
-{% block content %}{% endblock %}
-</main>
-<div id="loading"><div id="loading-text">처리하는 중...</div></div>
+</div>
+
 <script>
-  function showLoading(text) {
-    document.getElementById("loading-text").textContent = text;
-    document.getElementById("loading").classList.add("on");
+(function () {
+  var ov = document.getElementById("loading");
+  var timer = null;
+  function show(el, photo) {
+    ov.querySelector(".day").textContent = el.getAttribute("data-loading") || "처리하는 중";
+    ov.querySelector(".what").textContent = el.getAttribute("data-loading-sub") || "";
+    var prev = ov.querySelector(".photo-prev"), scale = ov.querySelector(".scale");
+    prev.hidden = !photo; scale.hidden = !!photo;
+    if (photo) { prev.style.backgroundImage = "url(" + URL.createObjectURL(photo) + ")"; prev.classList.add("has-img"); }
+    var ol = ov.querySelector(".progress-steps"); ol.innerHTML = "";
+    var steps = (el.getAttribute("data-steps") || "").split("|").filter(Boolean);
+    steps.forEach(function (t, i) { var li = document.createElement("li"); li.textContent = t; if (i === 0) li.className = "now"; ol.appendChild(li); });
+    // 단계는 시간이 지나면 하나씩 넘어간다 (실제 진행과 정확히 맞지는 않는다)
+    var n = 0; clearInterval(timer);
+    timer = setInterval(function () {
+      var lis = ol.children; if (n >= lis.length - 1) return clearInterval(timer);
+      lis[n].className = "done"; n += 1; lis[n].className = "now";
+    }, 12000);
+    ov.classList.add("on");
   }
-  document.querySelectorAll("form[data-loading]").forEach(function (form) {
-    form.addEventListener("submit", function () { showLoading(form.dataset.loading); });
+  document.querySelectorAll("form[data-loading]").forEach(function (f) { f.addEventListener("submit", function () { show(f); }); });
+  document.querySelectorAll("a[data-loading]").forEach(function (a) { a.addEventListener("click", function () { show(a); }); });
+  document.querySelectorAll("button[data-loading]").forEach(function (b) { b.addEventListener("click", function () { show(b); }); });
+  // 사진을 고르면 바로 올린다
+  document.querySelectorAll("input[type=file][data-autosubmit]").forEach(function (inp) {
+    inp.addEventListener("change", function () { if (!inp.files.length) return; show(inp.form, inp.files[0]); inp.form.submit(); });
   });
-  document.querySelectorAll("a[data-loading]").forEach(function (a) {
-    a.addEventListener("click", function () { showLoading(a.dataset.loading); });
+  // 금액 칸: 쉼표를 붙여 보여준다
+  document.querySelectorAll("input.money-input").forEach(function (inp) {
+    inp.addEventListener("input", function () {
+      var d = inp.value.replace(/[^0-9]/g, ""); inp.value = d ? Number(d).toLocaleString("ko-KR") : "";
+    });
   });
+  // 노란 줄: 값을 고치면 "고침" 표시 + 자동 확인, [8로 고치기] 버튼은 그 값을 넣고 확인
+  document.querySelectorAll(".fixrow").forEach(function (row) {
+    var ok = row.querySelector(".chip-ok input");
+    row.querySelectorAll("input:not([type=checkbox]):not([type=hidden]), select, .chip-half input").forEach(function (inp) {
+      inp.addEventListener("change", function () {
+        var changed = inp.type === "checkbox" ? inp.checked !== inp.defaultChecked : inp.value !== inp.defaultValue;
+        var box = inp.closest(".field-num"); if (box && changed) box.classList.add("edited");
+        if (ok && changed) ok.checked = true;
+      });
+    });
+    row.querySelectorAll("[data-fix]").forEach(function (b) {
+      b.addEventListener("click", function () {
+        var target = row.querySelector(b.getAttribute("data-fix"));
+        target.value = b.getAttribute("data-value"); target.dispatchEvent(new Event("change"));
+        if (ok) ok.checked = true;
+      });
+    });
+  });
+  // 복사 버튼
+  document.querySelectorAll("[data-copy]").forEach(function (b) {
+    b.addEventListener("click", function () {
+      var text = document.getElementById(b.getAttribute("data-copy")).innerText;
+      navigator.clipboard.writeText(text).then(function () { var t = b.querySelector(".t"); if (t) t.textContent = "복사했어요"; });
+    });
+  });
+})();
 </script>
+{% block scripts %}{% endblock %}
 </body>
 </html>

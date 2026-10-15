@@ -1,0 +1,50 @@
+{# 화면 부품. {% import "_ui.html" as ui %} 로 쓴다. item_pic·half_split은 전역 함수 #}
+
+{# 품목 그림 24px, 맞는 그림이 없으면 분류색 네모 #}
+{% macro pic(item, big=false) -%}
+{%- set p = item_pic(item) -%}
+{%- if p.src %}<img class="pic{{ ' big' if big }}" src="{{ p.src }}" alt="" width="{{ 44 if big else 24 }}" height="{{ 44 if big else 24 }}">
+{%- else %}<span class="sq {{ p.sq }}" aria-hidden="true"></span>{% endif -%}
+{%- endmacro %}
+
+{# 수량 칸 + 반 칩: [ 4 ][반] = 4.5. value는 숫자(None이면 빈칸), raw는 숫자로 못 읽었을 때 보여줄 글자 #}
+{% macro field_num(name, value=None, label="수량", placeholder="", typed=None, half_typed=None, edited=false) -%}
+{%- set whole, half = half_split(value) -%}
+<span class="field-num{{ ' edited' if edited }}"><input name="{{ name }}" inputmode="numeric" aria-label="{{ label }}"
+  value="{{ typed if typed is not none else whole }}" placeholder="{{ placeholder }}" autocomplete="off"><label class="chip-half"><input type="checkbox" name="{{ name }}_half" value="1" {{ 'checked' if (half_typed if half_typed is not none else half) }}>반</label></span>
+{%- endmacro %}
+
+{# 금액 칸: 원 단위, 쉼표는 입력하면서 붙는다 #}
+{% macro money(name, value="", label="금액", sm=false) -%}
+<span class="field-money{{ ' sm' if sm }}"><input name="{{ name }}" inputmode="numeric" aria-label="{{ label }}" value="{{ value }}" autocomplete="off" class="money-input"><span class="won">원</span></span>
+{%- endmacro %}
+
+{# 품목 고르기: 재고표 순서대로 분류별 묶음, 빨간 줄은 맨 위에 "비슷한 이름" #}
+{% macro item_select(name, items, selected=none, need=false, similar=()) -%}
+<select name="{{ name }}" aria-label="품목"{% if need %} class="need"{% endif %}>
+  <option value="">품목 고르기 ▾</option>
+  {% if similar %}<optgroup label="비슷한 이름">{% for item in similar %}<option value="{{ item.id }}">{{ item.name }} ({{ item.unit }})</option>{% endfor %}</optgroup>{% endif %}
+  {% for label, group in item_groups(items) %}<optgroup label="{{ label }}">
+    {% for item in group %}<option value="{{ item.id }}" {{ 'selected' if item.id == selected }}>{{ item.name }} ({{ item.unit }})</option>{% endfor %}
+  </optgroup>{% endfor %}
+</select>
+{%- endmacro %}
+
+{# 아래 탭바 4칸 #}
+{% macro tabbar(active) -%}
+<nav class="tabbar" aria-label="메뉴">
+  <a class="{{ 'on' if active == 'home' }}" href="/"{% if active == 'home' %} aria-current="page"{% endif %}><svg class="ico" aria-hidden="true"><use href="#i-store"/></svg>오늘</a>
+  <a class="{{ 'on' if active == 'sheet' }}" href="/sheet"{% if active == 'sheet' %} aria-current="page"{% endif %}><svg class="ico" aria-hidden="true"><use href="#i-clipboard-list"/></svg>재고표</a>
+  <a class="{{ 'on' if active == 'order' }}" href="/order" data-loading="발주 추천 만드는 중" data-loading-sub="메모가 있으면 AI가 확인하느라 1~3분" data-steps="마감 재고 불러오기|가게 메모 확인|지난 비슷한 날 찾기|품목별 수량 계산"{% if active == 'order' %} aria-current="page"{% endif %}><svg class="ico" aria-hidden="true"><use href="#i-shopping-basket"/></svg>발주</a>
+  <a class="{{ 'on' if active == 'more' }}" href="/more"{% if active == 'more' %} aria-current="page"{% endif %}><svg class="ico" aria-hidden="true"><use href="#i-menu"/></svg>더보기</a>
+</nav>
+{%- endmacro %}
+
+{# 머리띠: 가게 간판 + 날짜 칩 #}
+{% macro top(store_name, chip="", back="", late=false) -%}
+<header class="top">
+  {% if back %}<a class="back" href="{{ back }}" aria-label="뒤로">‹</a>{% endif %}
+  <span class="store-name">{{ store_name or "fresh-stock" }}</span>
+  {% if chip %}<span class="date{{ ' late' if late }}">{{ chip }}</span>{% endif %}
+</header>
+{%- endmacro %}

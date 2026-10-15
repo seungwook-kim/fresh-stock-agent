@@ -546,8 +546,8 @@ class StoreService:
             raise ValueError("취급하는 품목이 하나는 있어야 합니다.")
         self._save_catalog(catalog.with_active(item_id, active))
 
-    def save_supplier(self, supplier_id: str | None, *, name: str, channel: str) -> Supplier:
-        """거래처를 고치거나(supplier_id), None이면 새로 더한다."""
+    def save_supplier(self, supplier_id: str | None, *, name: str, channel: str, phone: str = "") -> Supplier:
+        """거래처를 고치거나(supplier_id), None이면 새로 더한다. phone은 문자·전화 버튼이 쓰는 번호."""
         catalog = self.catalog
         name = name.strip()
         if supplier_id is not None and supplier_id not in {s.id for s in catalog.suppliers}:
@@ -558,7 +558,12 @@ class StoreService:
             raise ValueError(f"'{name}'은(는) 이미 있는 거래처입니다.")
         if channel not in CHANNELS:
             raise ValueError("주문 방식을 골라 주세요.")
-        supplier = Supplier(supplier_id or _new_id("supplier", {s.id for s in catalog.suppliers}), name, channel)
+        phone = phone.strip()
+        if phone and not all(c.isdigit() or c in "-+ " for c in phone):
+            raise ValueError("전화번호는 숫자와 -만 적어 주세요.")
+        supplier = Supplier(
+            supplier_id or _new_id("supplier", {s.id for s in catalog.suppliers}), name, channel, phone
+        )
         self._save_catalog(catalog.with_supplier(supplier))
         return supplier
 

@@ -1,31 +1,62 @@
 {% extends "base.html" %}
-{% set active = "messages" %}
-{% block title %}거래처 문자{% endblock %}
-{% block content %}
-<h1>거래처 문자</h1>
-{% if not messages %}
-  <div class="card">승인된 발주가 없어요. <a href="/">홈으로</a></div>
-{% else %}
-<p class="muted" style="margin-top:-6px">{{ messages[0].arrival | day }} 입고분 · 품목과 수량은 승인한 발주 그대로예요.
-  {% if greeting %}<a href="/messages?day={{ day.isoformat() }}">인사말 빼기</a>
-  {% else %}<a href="/messages?day={{ day.isoformat() }}&greeting=true" onclick="document.getElementById('loading').classList.add('on')">AI 인사말 넣기</a>{% endif %}</p>
-{% for m in messages %}
-  <div class="card">
-    <div class="row" style="justify-content:space-between; margin-bottom:8px">
-      <b>{{ m.supplier.name }} <span class="muted">· {{ m.supplier.channel }}</span></b>
-      <button class="btn small secondary" type="button" onclick="copyText(this, 'msg-{{ loop.index }}')">복사</button>
-    </div>
-    <pre class="msg" id="msg-{{ loop.index }}">{{ m.text }}</pre>
-  </div>
-{% endfor %}
-<a class="btn block secondary" href="/">홈으로</a>
-{% endif %}
+{% import "_ui.html" as ui %}
+{% set active = "order" %}
+{% block title %}주문 보내기{% endblock %}
+{% block page %}
+{{ ui.top(store_name, ((messages[0].arrival | day) ~ " 입고") if messages else "", "/", late) }}
+<main class="body">
+  <h1 class="title">주문 보내기</h1>
+  {% if not messages %}
+    <div class="card">승인한 발주가 없어요.<a class="btn line block" href="/" style="margin-top:12px">홈으로</a></div>
+  {% else %}
+    <p class="sub">거래처 {{ messages | length }}곳 · <b class="ink">{{ sent | length }}곳 보냄</b> · 품목과 수량은 승인한 발주 그대로예요.</p>
+    <form method="get" action="/messages" class="switch-row" id="greet-form">
+      <input type="hidden" name="day" value="{{ day.isoformat() }}">
+      <span>AI 인사말 넣기 <span class="muted">("사장님 안녕하세요")</span></span>
+      <span class="sw"><input type="checkbox" name="greeting" value="true" {{ 'checked' if greeting }} aria-label="AI 인사말 넣기"><i></i></span>
+    </form>
+    {% for m in messages %}{% set sid = m.supplier.id %}{% set link = links[sid] %}
+      <div class="note{{ ' sent' if sid in sent }}" data-supplier="{{ sid }}">
+        <div class="to">{{ m.supplier.name }} <small>{{ m.supplier.channel }}{% if m.supplier.phone %} · {{ m.supplier.phone }}{% endif %}</small>
+          <span class="sent-mark">{% if sid in sent %}✓ 보냈어요 {{ sent[sid] }}{% endif %}</span></div>
+        <div class="body-text" id="msg-{{ loop.index }}">{{ m.text }}</div>
+        <div class="acts">
+          {% if m.supplier.channel == "전화" or (m.supplier.channel == "구매목록" and link.tel) %}
+            {% if link.tel %}<a class="btn main" href="{{ link.tel }}" data-sent>전화 걸기</a><a class="btn line again" href="{{ link.tel }}" data-sent>다시 걸기</a>
+            {% else %}<span class="muted" style="align-self:center">전화번호를 품목·설정에서 넣으면 바로 걸 수 있어요.</span>{% endif %}
+          {% elif m.supplier.channel == "구매목록" %}
+            <button type="button" class="btn main" data-copy="msg-{{ loop.index }}" data-sent><svg class="ico" aria-hidden="true"><use href="#i-copy"/></svg><span class="t">목록 복사</span></button>
+            <button type="button" class="btn line again" data-copy="msg-{{ loop.index }}"><span class="t">다시 복사</span></button>
+          {% else %}
+            <a class="btn main" href="{{ link.sms }}" data-sent>문자 보내기</a><a class="btn line again" href="{{ link.sms }}" data-sent>다시 보내기</a>
+          {% endif %}
+          <button type="button" class="btn line" data-copy="msg-{{ loop.index }}"><svg class="ico" aria-hidden="true"><use href="#i-copy"/></svg><span class="t">복사</span></button>
+        </div>
+      </div>
+    {% endfor %}
+    <a class="btn ghost block" href="/">홈으로</a>
+  {% endif %}
+</main>
+{{ ui.tabbar("order") }}
+{% endblock %}
+
+{% block scripts %}
 <script>
-  function copyText(button, id) {
-    navigator.clipboard.writeText(document.getElementById(id).textContent).then(function () {
-      button.textContent = "복사됨";
-      setTimeout(function () { button.textContent = "복사"; }, 1500);
+(function () {
+  var f = document.getElementById("greet-form");
+  if (f) f.querySelector("input[type=checkbox]").addEventListener("change", function () {
+    document.getElementById("loading").classList.add("on"); f.submit();
+  });
+  // 문자·전화·목록 복사 버튼을 누르면 보낸 것으로 남긴다
+  document.querySelectorAll("[data-sent]").forEach(function (b) {
+    b.addEventListener("click", function () {
+      var note = b.closest(".note"), body = new FormData();
+      body.append("day", "{{ day.isoformat() }}"); body.append("supplier", note.getAttribute("data-supplier"));
+      fetch("/messages/sent", { method: "POST", body: body, keepalive: true });
+      var now = new Date(), hm = String(now.getHours()).padStart(2, "0") + ":" + String(now.getMinutes()).padStart(2, "0");
+      note.classList.add("sent"); note.querySelector(".sent-mark").textContent = "✓ 보냈어요 " + hm;
     });
-  }
+  });
+})();
 </script>
 {% endblock %}

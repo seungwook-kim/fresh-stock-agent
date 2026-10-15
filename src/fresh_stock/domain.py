@@ -20,7 +20,8 @@ CHANNELS = ("구매목록", "문자", "전화")
 class Supplier:
     id: str
     name: str
-    channel: str  # 가락시장 / 문자 / 전화
+    channel: str  # 구매목록 / 문자 / 전화
+    phone: str = ""  # 문자·전화 버튼이 쓰는 번호 (없으면 번호 없이 문자 앱만 연다)
 
 
 @dataclass(frozen=True)

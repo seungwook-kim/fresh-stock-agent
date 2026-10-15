@@ -1,92 +1,88 @@
 {% extends "base.html" %}
+{% import "_ui.html" as ui %}
 {% set active = "home" %}
-{% block title %}홈{% endblock %}
+{% block title %}오늘{% endblock %}
 {% block content %}
-<div class="card">
-  {% if step == "sheet" %}
-    <h1>{{ status_day | day }} 마감 재고표를 올릴 차례예요</h1>
-    <p class="muted">마감 재고표를 사진으로 찍어 올리면 AI가 읽고, 확인이 필요한 칸만 표시해 드려요.</p>
-    <a class="btn block" href="/sheet">마감 재고표 올리기</a>
+{# 봉투 카드: 지금 할 일 하나 + 버튼 하나 #}
+<section class="bag">
+  <span class="fold" aria-hidden="true"></span>
+  {% if bag == "messages" %}
+    <div class="head"><div><div class="day">{{ plan.arrival | day }} 입고분</div><div class="what">주문 문자 {{ unsent | length }}곳 남음</div></div></div>
+    <div class="yl" aria-label="아직 안 보낸 거래처">{% for sup in unsent %}<span>{{ sup.name }}</span>{% endfor %}</div>
+    <a class="btn main" href="/messages?day={{ plan.order_day.isoformat() }}">문자 보내러 가기</a>
+  {% elif bag == "order" %}
+    <div class="head"><div><div class="day">{{ status_day | day }} 마감 끝</div><div class="what">내일 발주 확인할 차례</div></div></div>
+    <p>메모와 지난 기록을 보고 AI가 추천을 만들었어요. 바뀐 품목만 보고 승인하면 돼요.</p>
+    <a class="btn main" href="/order" data-loading="발주 추천 만드는 중" data-loading-sub="메모가 있으면 AI가 확인하느라 1~3분" data-steps="마감 재고 불러오기|가게 메모 확인|지난 비슷한 날 찾기|품목별 수량 계산">발주 확인하기</a>
+  {% elif bag == "review" %}
+    <div class="head"><div><div class="day">{{ status_day | day }} 마감</div>
+      <div class="what">{% if n_check or n_err %}{% if n_check %}노란 줄 {{ n_check }}개{% endif %}{% if n_err %}{{ ' · ' if n_check }}빨간 줄 {{ n_err }}개{% endif %}만 고치면 끝{% else %}확인할 줄 없음 · 현금·카드만 넣으면 끝{% endif %}</div></div></div>
+    {% if flagged_items %}
+      <div class="yl" aria-label="확인할 품목">{% for item in flagged_items %}<span>{{ ui.pic(item) }}{{ item.name }}</span>{% endfor %}</div>
+    {% else %}<p>AI가 읽은 재고표를 확인하고 확정하면 내일 발주 추천이 나와요.</p>{% endif %}
+    <a class="btn main" href="/sheet/review">{{ '고치러 가기' if n_check or n_err else '확정하러 가기' }}</a>
   {% else %}
-    <h1>{{ status_day | day }} 발주를 확인할 차례예요</h1>
-    <p class="muted">마감 재고로 다음 입고분 발주 추천을 만들었어요. 확인하고 승인하면 거래처 문자가 만들어져요.</p>
-    <a class="btn block" href="/order" data-loading="발주 추천을 만드는 중이에요. 확인하지 않은 메모가 있으면 AI가 확인하느라 1~3분 걸려요.">발주 확인하기</a>
+    <div class="head"><div><div class="day">{{ status_day | day }} 마감</div><div class="what">재고표 찍어 올릴 차례</div></div></div>
+    <p>손으로 적은 마감 재고표를 찍으면 AI가 읽고, 확인할 줄만 노랗게 보여 줘요.</p>
+    <a class="btn main" href="/sheet">재고표 찍으러 가기</a>
   {% endif %}
-  {% if last_plan %}
-    <p style="margin:12px 0 0"><a href="/messages?day={{ last_plan.order_day.isoformat() }}">{{ last_plan.arrival | day }} 입고분 거래처 문자 다시 보기</a></p>
-  {% endif %}
-</div>
+</section>
 
-<h2>가게 메모</h2>
-<div class="card">
-  <p class="muted" style="margin-top:0">TV 방송, 건강 기사, 동네 행사처럼 들은 이야기를 적어 두면, 발주 추천을 만들 때
-    AI가 웹 검색으로 확인하고 반영해요. 날씨와 명절은 자동으로 가져와요.</p>
-  {% if auto is not none %}<div class="note">날씨·명절 메모 {{ auto }}개를 새로 넣었어요.{% if auto_error %} {{ auto_error }}{% endif %}</div>{% endif %}
+{% set done1 = bag in ("review", "order", "messages") %}
+{% set done2 = bag in ("order", "messages") %}
+<ol class="steps card" aria-label="오늘 순서">
+  <li class="{{ 'done' if done1 else 'now' }}"><span class="n">1</span><span class="t">재고표 찍어 올리기</span><span class="muted">{{ '끝' if done1 else '지금' }}</span></li>
+  <li class="{{ 'done' if done2 else ('now' if bag == 'review') }}"><span class="n">2</span><span class="t">노란 줄 고치고 현금·카드 넣기</span>
+    {% if bag == "review" and n_check + n_err %}<span class="badge check">{{ n_check + n_err }}줄</span>{% else %}<span class="muted">{{ '끝' if done2 else '찍은 뒤' }}</span>{% endif %}</li>
+  <li class="{{ 'done' if bag == 'messages' else ('now' if bag == 'order') }}"><span class="n">3</span><span class="t">내일 발주 승인</span><span class="muted">{{ '끝' if bag == 'messages' else ('지금' if bag == 'order' else '마감 뒤') }}</span></li>
+  <li class="{{ 'now' if bag == 'messages' }}"><span class="n">4</span><span class="t">거래처 문자 보내기</span><span class="muted">{{ '지금' if bag == 'messages' else '승인 뒤' }}</span></li>
+</ol>
+
+<h2 class="sec">가게 메모 <small>발주 AI가 참고해요</small></h2>
+{% if auto is not none %}<div class="note-ok">날씨·명절 메모 {{ auto }}개를 새로 넣었어요.{% if auto_error %} {{ auto_error }}{% endif %}</div>{% endif %}
+<div class="card flat memos">
   {% for n in notes %}
-    <div style="border-bottom:1px solid var(--line); padding:8px 0">
-      <div class="row" style="justify-content:space-between">
-        <span><b>{{ n.day | day }}</b> {{ n.text }}
-          {% if n.source != owner_note %}<span class="muted">· {{ n.source }} 자동</span>{% endif %}</span>
-        <form method="post" action="/notes/{{ n.id }}/delete"><button class="btn small secondary">삭제</button></form>
-      </div>
-      {% if n.source == owner_note %}
-        {% if n.research %}
-          <div class="{{ 'reason' if n.research.confirmed else 'flags' }}" style="margin-top:4px">
-            {{ 'AI 확인' if n.research.confirmed else 'AI가 확인하지 못함' }}: {{ n.research.summary }}
-            {% if n.research['items'] %}<br>관련 품목: {% for i in n.research['items'] %}{{ catalog.item(i).name }}{{ ', ' if not loop.last }}{% endfor %}{% endif %}
-            {% for title, url in n.research.sources %}<br><a href="{{ url }}" target="_blank" rel="noopener">{{ title }}</a>{% endfor %}
-          </div>
-        {% else %}
-          <div class="muted" style="margin-top:4px">발주 추천을 만들 때 AI가 확인해요.</div>
-        {% endif %}
-        {% if can_research %}
-          <form method="post" action="/notes/{{ n.id }}/research" data-loading="AI가 메모를 웹 검색으로 확인하는 중이에요 (1~3분)." style="margin-top:4px">
-            <button class="btn small secondary">{{ '다시 확인' if n.research else '지금 확인' }}</button>
-          </form>
-        {% endif %}
+    <details class="memo-d">
+      <summary class="memo"><span class="md tnum"><b>{{ n.day.month }}/{{ n.day.day }}</b>{{ WEEKDAYS[n.day.weekday()] }}</span>
+        {% if n.source == "날씨" %}<img class="wx" src="{{ weather_pic(n.text) }}" alt="" width="28" height="28">{% else %}<span class="wx"></span>{% endif %}
+        <span class="mt">{{ n.text }}<br>
+          {% if n.source != owner_note %}<span class="muted">{{ n.source }} 자동</span>
+          {% elif n.research %}<span class="badge ai">AI 검색</span> <span class="muted">{{ '확인됨' if n.research.confirmed else '확인 못 함' }} · 눌러서 보기</span>
+          {% else %}<span class="muted">발주 추천을 만들 때 AI가 확인해요</span>{% endif %}</span></summary>
+      {% if n.research %}
+        <div class="memo-research">{{ 'AI 확인' if n.research.confirmed else 'AI가 확인하지 못함' }}: {{ n.research.summary }}
+          {% if n.research['items'] %}<br>관련 품목: {% for i in n.research['items'] %}{{ catalog.item(i).name }}{{ ', ' if not loop.last }}{% endfor %}{% endif %}
+          {% for title, url in n.research.sources[:3] %}<br><a href="{{ url }}" target="_blank" rel="noopener">{{ title }}</a>{% endfor %}</div>
       {% endif %}
-    </div>
+      <div class="memo-acts">
+        {% if n.source == owner_note and can_research %}
+          <form method="post" action="/notes/{{ n.id }}/research" data-loading="메모 확인하는 중" data-loading-sub="AI가 웹에서 찾아봐요 · 1~3분" data-steps="메모 읽기|웹 검색|관련 품목 맞추기"><button class="btn line small">{{ 'AI로 다시 확인' if n.research else 'AI로 지금 확인' }}</button></form>
+        {% endif %}
+        <form method="post" action="/notes/{{ n.id }}/delete"><button class="btn ghost small">지우기</button></form>
+      </div>
+    </details>
   {% else %}
-    <p class="muted">앞으로 예정된 메모가 없어요.</p>
+    <div class="memo"><span></span><span></span><span class="muted">앞으로 예정된 메모가 없어요.</span></div>
   {% endfor %}
-  <form method="post" action="/notes" class="row" style="margin-top:10px">
-    <input type="date" name="day" value="{{ default_note_day }}" required>
-    <input type="text" name="text" placeholder="예: 어제 TV에서 양배추가 몸에 좋다고 나왔대" style="flex:1; min-width:180px" required>
-    <button class="btn small">추가</button>
+  <form method="post" action="/notes" class="memo-add">
+    <input class="input" name="text" placeholder="예: TV에서 양배추 효능 나옴" required aria-label="메모">
+    <button class="btn line small">추가</button>
+    <label class="when">언제 영향?
+      <select class="input" name="day" style="width:auto">{% for d in note_days %}<option value="{{ d.isoformat() }}" {{ 'selected' if d == default_note_day }}>{{ d | day }}</option>{% endfor %}</select></label>
   </form>
-  <div class="row" style="margin-top:10px">
-    <form method="post" action="/notes/auto" data-loading="날씨와 명절을 가져오는 중이에요."><button class="btn small secondary">날씨·명절 가져오기</button></form>
-  </div>
 </div>
+<form method="post" action="/notes/auto" data-loading="날씨·명절 가져오는 중" data-steps="날씨 예보 받기|명절 확인"><button class="btn ghost block">날씨·명절 가져오기</button></form>
 
-<h2>최근 매출</h2>
-<div class="card">
-  <p class="muted" style="margin-top:0">추정 매출은 재고표로 역산한 판매량 × 가격이에요 (떨이는 할인가). 차이가 크면 할인이나 기록 실수가 있었을 수 있어요.</p>
-  {% set with_purchase = revenue | selectattr('purchase') | list %}
-  <table>
-    <colgroup><col style="width:4.5em"><col><col><col style="width:5.5em">{% if with_purchase %}<col>{% endif %}</colgroup>
-    <tr><th>날짜</th><th class="num">실제 (현금+카드)</th><th class="num">추정</th><th class="num">차이</th>
-        {% if with_purchase %}<th class="num">사입</th>{% endif %}</tr>
-    {% for r in revenue %}
-      <tr><td>{{ r.day | day }}</td><td class="num">{{ r.actual | won }}</td><td class="num">{{ r.estimated | won }}</td>
-          <td class="num">{{ r.gap | won }}</td>
-          {% if with_purchase %}<td class="num">{{ r.purchase | won if r.purchase else '-' }}</td>{% endif %}</tr>
-    {% else %}
-      <tr><td colspan="4" class="muted">아직 기록이 없어요.</td></tr>
-    {% endfor %}
-  </table>
-  {% if with_purchase %}<p class="muted" style="margin-bottom:0">사입은 재고표의 사입 수량 × 사입 가격이에요.</p>{% endif %}
-</div>
-
-<h2>재고표 인식 기록</h2>
-<div class="card">
-  <p class="muted" style="margin-top:0">확인 화면에서 확정한 줄 중 AI가 읽은 값을 고친 줄이에요. 실제 인식률을 추적하는 데 써요.</p>
-  {% for label, value in corrections.items() %}
-    <div class="row" style="justify-content:space-between"><span>{{ label }}</span><b>{{ value }}</b></div>
+<h2 class="sec">최근 매출 <small>돈통 / 재고표로 추정</small></h2>
+<div class="card flat sales">
+  {% for r in revenue %}
+    <div class="sale"><span class="d tnum">{{ r.day | day }}{% if r.day in market %} <span class="jang">장날</span>{% endif %}</span><b class="a tnum">{{ r.actual | won }}</b>
+      <span class="r"><span class="badge ai">AI 추정</span> <span class="tnum">{{ r.estimated | comma }}</span> ·
+        {% if r.gap >= 0 %}<b class="tnum">{{ r.gap | comma }}원 더 들어옴</b>{% else %}<b class="tnum minus">−{{ (-r.gap) | comma }}원 덜 들어옴</b>{% endif %}
+        {% if r.purchase %}<br><span class="muted">사입 {{ r.purchase | comma }}원</span>{% endif %}</span></div>
+  {% else %}
+    <div class="sale"><span class="muted">아직 기록이 없어요.</span></div>
   {% endfor %}
-  <div style="margin-top:10px"><b>익힌 줄임말 {{ aliases | length }}개</b>
-    <span class="muted">· 다음 재고표부터 AI에게 알려주고, 결과와 다르면 표시해요</span></div>
-  {% if aliases %}<p class="muted" style="margin:4px 0 0">
-    {% for raw, item_id in aliases | dictsort %}{{ raw }} → {{ catalog.item(item_id).name }}{{ ', ' if not loop.last }}{% endfor %}</p>{% endif %}
 </div>
+<p class="muted">덜 들어온 날은 떨이 할인이나 적기 실수가 있었을 수 있어요.</p>
 {% endblock %}

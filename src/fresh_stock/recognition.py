@@ -116,13 +116,19 @@ def parse_qty(raw: str) -> float | None:
 
 
 def parse_price(raw: str) -> int | None:
-    """사입 가격 글자를 원 단위 정수로 바꾼다. "42000", "42,000", "4.2만", "4만2천", "42천". 해석할 수 없으면 None."""
+    """사입 가격 글자를 원 단위 정수로 바꾼다. "42000", "42,000", "4.2만", "4만2천", "4만2천5백", "42천", 만원.
+    만 뒤에 숫자만 붙으면 만 아래 자리로 읽는다: "3만8" = 38,000, "3만85" = "3만8500" = 38,500. 해석할 수 없으면 None."""
     text = raw.strip().replace(",", "").replace(" ", "").removesuffix("원")
+    if text.startswith("만"):
+        text = "1" + text
     if re.fullmatch(r"\d+", text):
         return int(text)
-    m = re.fullmatch(r"(\d+(?:\.\d+)?)만(?:(\d)천)?", text)
+    m = re.fullmatch(r"(\d+(?:\.\d+)?)만(?:(\d)천)?(?:(\d)백)?", text)
     if m:
-        return round(float(m.group(1)) * 10000) + int(m.group(2) or 0) * 1000
+        return round(float(m.group(1)) * 10000) + int(m.group(2) or 0) * 1000 + int(m.group(3) or 0) * 100
+    m = re.fullmatch(r"(\d+)만(\d{1,4})", text)
+    if m:
+        return int(m.group(1)) * 10000 + int(m.group(2).ljust(4, "0"))
     m = re.fullmatch(r"(\d+)천", text)
     return int(m.group(1)) * 1000 if m else None
 

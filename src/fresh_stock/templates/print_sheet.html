@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>재고표 · {{ store_name }}</title>
+<link rel="stylesheet" href="/static/fonts/pretendard/pretendard-subset.css">
+<link rel="stylesheet" href="/static/app.css">
+<style>@page { size: A4 portrait; margin: 0; }</style>
+</head>
+<body class="print">
+<div class="print-page">
+  <p class="no-print" style="display:flex;gap:8px;margin:0 0 12px">
+    <button class="btn main small" type="button" onclick="window.print()">인쇄하기</button>
+    <a class="btn ghost small" href="/settings">품목·설정으로</a>
+  </p>
+  <h1><span>{{ store_name }} 마감 재고표</span><span style="font-weight:400">날짜 ____월 ____일 (____)</span></h1>
+  <table class="print-tbl">
+    <colgroup>
+      {% for side in range(2) %}
+        <col style="width:{{ 18 if store_layout else 30 }}%"><col style="width:{{ 8 if store_layout else 18 }}%">
+        {% if store_layout %}<col style="width:8%"><col style="width:13%">{% endif %}
+        {% if loop.first %}<col style="width:8px">{% endif %}
+      {% endfor %}
+    </colgroup>
+    <tr>
+      {% for side in range(2) %}
+        <th>품목</th><th>남은 수량</th>{% if store_layout %}<th>사입 수량</th><th>사입 가격</th>{% endif %}
+        {% if loop.first %}<th class="gap"></th>{% endif %}
+      {% endfor %}
+    </tr>
+    {% for n in range(rows) %}
+      <tr>
+        {% for side in (left, right) %}
+          <td>{{ side[n].name if n < side | length else '' }}</td><td></td>{% if store_layout %}<td></td><td></td>{% endif %}
+          {% if loop.first %}<td class="gap"></td>{% endif %}
+        {% endfor %}
+      </tr>
+    {% endfor %}
+  </table>
+  <p style="font-size:12px;margin:8px 0 0">남은 수량이 없으면 0, 반 박스는 "4반"처럼 적어 주세요. 빈 줄에는 목록에 없는 품목을 적어도 돼요.</p>
+</div>
+</body>
+</html>

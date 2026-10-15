@@ -183,7 +183,8 @@ store_catalog = sample_store_catalog()
 @pytest.mark.parametrize(
     "raw, price",
     [("42000", 42000), ("42,000", 42000), ("4.2만", 42000), ("4만2천", 42000), ("42천", 42000),
-     ("6,900원", 6900), ("4만", 40000), ("abc", None), ("", None)],
+     ("6,900원", 6900), ("4만", 40000), ("abc", None), ("", None),
+     ("3만8", 38000), ("3만85", 38500), ("3만8500", 38500), ("3만 8천5백원", 38500), ("만원", 10000), ("3만85000", None)],
 )  # fmt: skip
 def test_parse_price(raw, price):
     assert parse_price(raw) == price

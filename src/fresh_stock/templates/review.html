@@ -1,88 +1,148 @@
 {% extends "base.html" %}
-{% set active = "sheet" %}
+{% import "_ui.html" as ui %}
 {% block title %}재고표 확인{% endblock %}
-{% macro item_select(name, selected) %}
-  <select name="{{ name }}" style="max-width:9.5em">
-    <option value="">품목 선택</option>
-    {% for item in catalog.items %}
-      <option value="{{ item.id }}" {{ 'selected' if item.id == selected }}>{{ item.name }} ({{ item.unit }})</option>
+
+{% macro item_select(name, selected, need=false, similar=()) -%}{{ ui.item_select(name, catalog.items, selected, need, similar) }}{%- endmacro %}
+
+{# 사입 칸: 사입 수량 [ ][반] + 사입 가격 [ ]원 #}
+{% macro buy_fields(idx, r=none, t={}) -%}
+<span class="buy3">
+  <span class="lbl">사입 수량</span><span class="lbl">사입 가격</span>
+  {{ ui.field_num('buyq_%d' % idx, r.buy_qty_read if r else none, '사입 수량', '', t.buyq if t else none, t.buyh if t else none) }}
+  {{ ui.money('buyp_%d' % idx, t.buyp if t else ((r.buy_price_read | comma) if r and r.buy_price_read is not none else (r.raw_buy_price if r else '')), '사입 가격', true) }}
+</span>
+{%- endmacro %}
+
+{% block page %}
+<form method="post" action="/sheet/confirm" class="screen-form review-form{{ ' many' if n_check > 6 }}" data-loading="마감 확정하고 발주 만드는 중" data-loading-sub="내일 입고분 · 메모가 있으면 1~3분" data-steps="{{ order_steps }}">
+  {{ ui.top(store_name, (day | day) ~ " 마감", "/", late) }}
+  <main class="body">
+    <h1 class="title">재고표 확인</h1>
+    <p class="sub">{{ rows | length }}줄 읽음 · <b class="ink">노란 줄 {{ n_check }}개</b>{% if n_err %} · <b class="red-t">빨간 줄 {{ n_err }}개</b>{% endif %}</p>
+    {% if error %}<div class="alert {{ 'err' if bad or n_err else 'check' }}">{{ error }}</div>{% endif %}
+    {% if store_layout %}<p class="muted" style="margin-top:-8px">사입 칸은 확정하면 그날 입고와 사입 가격으로 기록돼요.</p>{% endif %}
+    <a class="btn line block" href="/sheet/image/{{ day.isoformat() }}" target="_blank" rel="noopener" style="margin-bottom:14px">재고표 사진에서 보기 (확대)</a>
+
+    <div id="fixes">
+    {% for f in fixes %}{% set r = f.r %}{% set t = entered.get(r.idx, {}) %}
+      <div class="fixrow{{ ' err' if f.kind == 'err' }}{{ ' need-num' if f.kind == 'need' }}{{ ' unresolved' if f.unresolved }}" id="r{{ r.idx }}">
+        <div class="read"><span class="no">{{ r.idx + 1 }}줄</span>
+          <span class="pen">{{ r.raw_name }} {{ r.raw_qty }}{% if store_layout and (r.raw_buy_qty or r.raw_buy_price) %} │ {{ r.raw_buy_qty or '·' }} │ {{ r.raw_buy_price or '·' }}{% endif %}</span>
+          {% if f.kind == 'err' %}<span class="badge err">저장 못 함</span>{% else %}<span class="badge check">확인</span>{% endif %}<span class="done-mark">✓ 확인함</span>
+          <span class="why">{% if f.kind == 'need' %}남은 수량을 못 읽었어요. 숫자를 넣으면 확인돼요.{% elif f.kind == 'err' and not (t.item if t else r.item_id_read) %}"{{ r.raw_name }}"이 어느 품목인지 몰라요. 품목을 골라야 확정돼요.{% else %}{{ f.why }}{% endif %}</span></div>
+        {% if f.fix is not none %}
+          <div class="vs">어제 재고+입고 <b>{{ f.limit | qty }}</b> · 읽은 값 <b class="big">{{ r.qty_read | qty }}</b></div>
+          <div class="edit two">
+            <button type="button" class="btn main" data-fix="input[name=qty_{{ r.idx }}]" data-value="{{ f.fix }}">{{ f.fix }}로 고치기</button>
+            <label class="chip-ok"><input type="checkbox" name="ok_{{ r.idx }}" value="1" {{ 'checked' if t.ok }}>{{ r.qty_read | qty }} 맞아요</label>
+          </div>
+        {% endif %}
+        <div class="edit">
+          {{ item_select('item_%d' % r.idx, t.item if t else r.item_id_read, f.kind == 'err', f.similar) }}
+          {{ ui.field_num('qty_%d' % r.idx, r.qty_read, '남은 수량', '?' if f.kind == 'need' else '', t.qty if t else none, t.half if t else none) }}
+          {% if store_layout %}{{ buy_fields(r.idx, r, t) }}{% endif %}
+          {% if f.kind == 'check' and f.fix is none %}<label class="chip-ok"><input type="checkbox" name="ok_{{ r.idx }}" value="1" {{ 'checked' if t.ok }}>맞아요</label>{% endif %}
+        </div>
+      </div>
     {% endfor %}
-  </select>
-{% endmacro %}
-{% macro buy_row(idx, row_class, qty, price, span=3) %}
-  <tr class="{{ row_class }}"><td colspan="{{ span }}" style="border-top:0; padding-top:0">
-    <span class="muted">사입</span>
-    <input name="buyq_{{ idx }}" inputmode="decimal" placeholder="수량" value="{{ qty }}" style="width:4.6em; text-align:right">
-    <input name="buyp_{{ idx }}" inputmode="numeric" placeholder="가격" value="{{ price }}" style="width:7em; text-align:right"> 원
-  </td></tr>
-{% endmacro %}
-{% block content %}
-<h1>{{ day | day }} 재고표 확인</h1>
-{% if error %}<div class="alert">{{ error }}</div>{% endif %}
-<div class="note">
-  {{ rows | length }}줄을 읽었어요.
-  {% if flagged %}<b>노란 줄 {{ flagged }}개</b>만 사진과 비교해 확인해 주세요.{% else %}확인이 필요한 줄은 없어요.{% endif %}
-  수량은 <code>4.5</code>, <code>4반</code>처럼 적어도 돼요.
-  {% if store_layout %}사입 칸은 그날 실제로 들어온 양과 산 가격이에요. 확정하면 그날 입고와 사입 가격으로 기록돼요 (빈 칸은 안 들어온 것).{% endif %}
-</div>
-<details class="card"><summary>재고표 사진 보기</summary>
-  <img class="sheet" src="/sheet/image/{{ day.isoformat() }}" alt="{{ day | day }} 마감 재고표">
-</details>
 
-<form method="post" action="/sheet/confirm" data-loading="재고를 저장하고 발주 추천을 만드는 중이에요. 확인하지 않은 메모가 있으면 AI가 확인하느라 1~3분 걸려요.">
-<div class="card" style="padding:6px 8px">
-  <table>
-    <colgroup><col><col class="item-col"><col class="qty-col"></colgroup>
-    <tr><th>적힌 글자</th><th>품목</th><th class="num">재고</th></tr>
-    {% for r in rows %}
-      {% set typed = entered.get(r.idx) %}
-      {% set row_class = 'warn' if r.idx in bad else ('flag' if r.flags) %}
-      <tr class="{{ row_class }}">
-        <td>{{ r.raw_name }} <b>{{ r.raw_qty }}</b>
-          {% if store_layout and (r.raw_buy_qty or r.raw_buy_price) %}<div class="muted">사입 {{ r.raw_buy_qty or '-' }} · {{ r.raw_buy_price or '-' }}</div>{% endif %}
-          {% if r.flags %}<div class="flags">{{ r.flags | join(' · ') }}</div>{% endif %}</td>
-        <td>{{ item_select('item_%d' % r.idx, typed[0] if typed else r.item_id_read) }}</td>
-        <td class="num"><input class="qty" name="qty_{{ r.idx }}"
-          value="{{ typed[1] if typed else ('%g' % r.qty_read if r.qty_read is not none else r.raw_qty) }}"></td>
-      </tr>
-      {% if store_layout %}
-        {{ buy_row(r.idx, row_class,
-                   typed[2] if typed else ('%g' % r.buy_qty_read if r.buy_qty_read is not none else r.raw_buy_qty),
-                   typed[3] if typed else (r.buy_price_read if r.buy_price_read is not none else r.raw_buy_price)) }}
-      {% endif %}
+    {% for m in missing %}{% set t = entered.get(m.idx, {}) %}
+      <div class="fixrow miss{{ ' unresolved' if m.unresolved }}" id="r{{ m.idx }}">
+        <input type="hidden" name="miss_{{ m.idx }}" value="1"><input type="hidden" name="item_{{ m.idx }}" value="{{ m.item.id }}">
+        <div class="read"><span class="no">재고표에 없음</span><span class="nm-b">{{ m.item.name }} <span class="unit">{{ m.item.unit }}</span></span>
+          <span class="badge check">확인</span><span class="done-mark">✓ 확인함</span>
+          <span class="why">{% if m.prev and m.came %}어제 {{ m.prev | qty }}{{ m.item.unit }} 남고 오늘 {{ m.came | qty }}{{ m.item.unit }} 들어왔는데{% elif m.came %}오늘 {{ m.came | qty }}{{ m.item.unit }} 들어왔는데{% else %}어제 {{ m.prev | qty }}{{ m.item.unit }} 남았는데{% endif %}
+            재고표엔 없어요. 다 팔렸나요?</span></div>
+        <div class="edit two">
+          <label class="chip-zero"><input type="checkbox" name="zero_{{ m.idx }}" value="1" {{ 'checked' if t.zero }}>0 맞아요</label>
+          {{ ui.field_num('qty_%d' % m.idx, none, '남은 수량', '수량', t.qty if t else none, t.half if t else none) }}
+          {% if store_layout %}{{ buy_fields(m.idx, none, t) }}{% endif %}
+        </div>
+      </div>
     {% endfor %}
-  </table>
-</div>
+    </div>
 
-{% if missing %}
-<div class="card">
-  <b>재고표에 없는 품목</b>
-  <p class="muted" style="margin:4px 0">아래 품목은 표에 없어서 재고 0으로 저장돼요. 남아 있을 품목이 있으면 아래에 추가해 주세요.</p>
-  <p style="margin:0">{% for item in missing %}{{ item.name }} (최대 {{ '%g' % max_possible[item.id] }}{{ item.unit }}){{ ', ' if not loop.last }}{% endfor %}</p>
-</div>
-{% endif %}
+    <h2 class="sec">종이 순서 전체 <small>누르면 그 줄 고침</small></h2>
+    <div class="sheet{{ ' with-buy' if store_layout }}">
+      <div class="hd"><span>줄</span><span>품목</span><span class="r">남은</span>{% if store_layout %}<span class="r">사입</span><span class="r">가격</span>{% endif %}</div>
+      {% for r in rows %}{% set item = catalog.item(r.item_id_read) if r.item_id_read in known else none %}
+        {% set cells %}
+          <span class="no">{{ r.idx + 1 }}</span>
+          <span class="nm">{% if item %}{{ item.name }} <span class="unit">{{ item.unit }}</span>{% else %}({{ r.raw_name }}){% endif %}</span>
+          <span class="v{{ ' empty' if r.qty_read is none }}">{{ (r.qty_read | qty) if r.qty_read is not none else '?' }}</span>
+          {% if store_layout %}<span class="v{{ ' empty' if r.buy_qty_read is none }}">{{ (r.buy_qty_read | qty) if r.buy_qty_read is not none else '·' }}</span>
+          <span class="v{{ ' empty' if r.buy_price_read is none }}">{{ (r.buy_price_read | comma) if r.buy_price_read is not none else '·' }}</span>{% endif %}
+        {% endset %}
+        {% if r.idx in fix_idx %}
+          {% set f = fixes | selectattr('r.idx', 'equalto', r.idx) | first %}
+          <a class="row {{ 'err' if f.kind == 'err' else 'check' }}" href="#r{{ r.idx }}">{{ cells }}</a>
+        {% else %}{% set t = entered.get(r.idx, {}) %}
+          <details class="line"{% if t and (t.item != r.item_id_read) %} open{% endif %}>
+            <summary class="row">{{ cells }}</summary>
+            <div class="row-edit">
+              {{ item_select('item_%d' % r.idx, t.item if t else r.item_id_read) }}
+              <span>{{ ui.field_num('qty_%d' % r.idx, r.qty_read, '남은 수량', '', t.qty if t else none, t.half if t else none) }}</span>
+              {% if store_layout %}{{ buy_fields(r.idx, r, t) }}{% endif %}
+            </div>
+          </details>
+        {% endif %}
+      {% endfor %}
+    </div>
 
-<div class="card">
-  <b>빠진 품목 추가</b>
-  <table>
-    <colgroup><col><col class="qty-col"></colgroup>
-    {% for k in range(3) %}
-      {% set idx = rows | length + k %}
-      {% set typed = entered.get(idx) %}
-      <tr class="{{ 'warn' if idx in bad }}"><td>{{ item_select('item_%d' % idx, typed[0] if typed else None) }}</td>
-          <td class="num"><input class="qty" name="qty_{{ idx }}" placeholder="수량" value="{{ typed[1] if typed else '' }}"></td></tr>
-      {% if store_layout %}{{ buy_row(idx, 'warn' if idx in bad else '', typed[2] if typed else '', typed[3] if typed else '', 2) }}{% endif %}
-    {% endfor %}
-  </table>
-</div>
+    <details class="add-rows"{% if entered | length and add_rows | select('in', entered) | list %} open{% endif %}>
+      <summary class="btn ghost block">+ 빠진 품목 넣기</summary>
+      <div class="card" style="margin-top:8px">
+        {% for idx in add_rows %}{% set t = entered.get(idx, {}) %}
+          <div class="add-row">
+            {{ item_select('item_%d' % idx, t.item if t else none, idx in bad) }}
+            <span>{{ ui.field_num('qty_%d' % idx, none, '남은 수량', '수량', t.qty if t else none, t.half if t else none) }}</span>
+            {% if store_layout %}{{ buy_fields(idx, none, t) }}{% endif %}
+          </div>
+        {% endfor %}
+      </div>
+    </details>
 
-<div class="card">
-  <b>오늘 매출</b>
-  <div class="row" style="margin-top:8px">
-    <label>돈통 현금 <input name="cash" inputmode="numeric" placeholder="0" value="{{ cash }}" style="width:9em"></label>
-    <label>카드 합계 <input name="card" inputmode="numeric" placeholder="0" value="{{ card }}" style="width:9em"></label>
+    <h2 class="sec">돈통 합계</h2>
+    <div class="card">
+      <label class="field"><span>돈통 현금</span>{{ ui.money('cash', cash, '돈통 현금') }}</label>
+      <label class="field" style="margin:0"><span>카드 합계 <span class="muted">카드 0원인 날은 0 입력</span></span>{{ ui.money('card', card, '카드 합계') }}</label>
+      <p class="total"><span>오늘 매출</span> <b id="sales-total" class="muted">카드 합계를 넣으면 계산돼요</b></p>
+    </div>
+  </main>
+  <div class="bar-action">
+    <div class="sum"><span class="left"><span class="left-count"></span></span><span>{{ rows | length }}줄{% if n_err %} · 빨간 줄 <b class="red-t">{{ n_err }}</b>{% endif %}</span></div>
+    {% set first_err = fixes | selectattr('kind', 'equalto', 'err') | first %}
+    <a class="btn go-err" href="#r{{ first_err.r.idx if first_err else '' }}">빨간 줄 고쳐야 확정 ↑</a>
+    <a class="btn go go-left" href="#fixes">남은 노란 줄로 ↑</a>
+    <button class="btn main confirm">마감 확정하고 발주 만들기</button>
   </div>
-</div>
-<button class="btn block">재고 확정</button>
 </form>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function () {
+  // 빨간 줄: 품목을 고르면 확인한 줄로 바뀐다. 재고표에 없는 품목: [0 맞아요]나 수량을 넣으면 확인
+  document.querySelectorAll(".fixrow.err").forEach(function (row) {
+    var sel = row.querySelector("select");
+    function upd() { var ok = !!sel.value; row.classList.toggle("err", !ok); row.classList.toggle("resolved", ok); sel.classList.toggle("need", !ok); }
+    sel.addEventListener("change", upd);
+    row.querySelectorAll(".field-num input").forEach(function (i) { i.addEventListener("change", upd); });
+  });
+  document.querySelectorAll(".fixrow.miss").forEach(function (row) {
+    var zero = row.querySelector(".chip-zero input"), q = row.querySelector(".field-num input[inputmode]");
+    function upd() { row.classList.toggle("resolved", zero.checked || q.value.trim() !== ""); }
+    zero.addEventListener("change", upd); q.addEventListener("input", upd); upd();
+  });
+  // 오늘 매출 = 현금 + 카드
+  var cash = document.querySelector("input[name=cash]"), card = document.querySelector("input[name=card]"), out = document.getElementById("sales-total");
+  function num(i) { var d = i.value.replace(/[^0-9]/g, ""); return d === "" ? null : Number(d); }
+  function total() {
+    var a = num(cash), b = num(card);
+    if (a === null || b === null) { out.textContent = "카드 합계를 넣으면 계산돼요"; out.className = "muted"; return; }
+    out.textContent = (a + b).toLocaleString("ko-KR") + "원"; out.className = "";
+  }
+  cash.addEventListener("input", total); card.addEventListener("input", total); total();
+})();
+</script>
 {% endblock %}

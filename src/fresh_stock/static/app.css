@@ -1,0 +1,666 @@
+/* fresh-stock 디자인 토큰 + 공통 컴포넌트.
+   디자인 회의(서연·민재·하늘·정호·유진) 목업의 tokens.css를 옮긴 것. 결정 근거: 작업파일/디자인회의/결정사항.md
+   빌드 없음, 외부 CDN 없음. 글꼴은 base.html에서 /static/fonts/pretendard/pretendard-subset.css 를 먼저 읽는다. */
+
+:root {
+  /* 색: 주제색 = 상태색. 밝은 곳 대비 기준 WCAG AA(4.5:1) 이상 */
+  --leaf: #1f4d2b;        /* 잎 초록: 머리띠·주 버튼 (흰 글자 9.75:1, 정호 실측) */
+  --leaf-deep: #15371e;
+  --leaf-soft: #e7f0e3;   /* leaf-50: 선택 탭·좋음 */
+  --kraft: #f3ece0;       /* 크라프트 바탕 (민재 #21) */
+  --bag: #d9c4a0;         /* 종이봉투: '오늘 할 일' 카드 전용 (민재 #28, 상한 #c8ad7f), 위 글자 #111, 흰 글자 금지 */
+  --paper: #ffffff;       /* 카드 안 = 흰색 (정호) */
+  --sheet: #fffef8;       /* 재고표 종이 */
+  --rule: #e4dccd;        /* 괘선 */
+  --rule-strong: #8a7a62;  /* 입력칸·select 테두리 2px (흰 위 4.17, 정호 1.4.11) */
+  --ink: #1c1a17;         /* 본문 14.8:1 */
+  --ink-2: #6b5a45;       /* kraft-ink 보조글: 흰 6.6 / 크라프트 5.6. 회색 금지 */
+  --pen: #1f3f8f;         /* 볼펜 파랑: "적힌 글자" 자리 전용 (흰 9.70:1, 노랑 6.77:1) */
+  --tag: #ffd84d;         /* 형광 가격표 노랑: "확인 필요" 전용. 다른 곳 금지 */
+  --tag-band: #5a4500;    /* 노란 줄 왼쪽 6px 띠 */
+  --tag-soft: #fff4b8;
+  --red: #b3261e;         /* 오류·입력 실수 */
+  --red-soft: #fde7e5;
+  --red-ink: #8c1d18;     /* 오류 줄 글자 7.70:1 */
+  --ai: #5b3a8c;          /* grape: AI 판단. 반드시 'AI 추천/AI 추정' 글자칩과 함께 */
+  --ai-soft: #f1ecf8;
+  /* 분류색 (품목 그림 없을 때 동그라미) */
+  --c-fruit: #e08a2e;  /* 감 주황: 글자 없는 장식 네모 전용. 오류 빨강·가격표 노랑과 안 겹치게 (정호 #48, 서연 #56) */
+  --c-veg: #2f6b2b;    /* 흰 글자 6.44 */
+  --c-tofu: #7d6224;   /* 흰 글자 5.76 */
+  --c-dry: #7a4e2d;
+
+  /* 글꼴: 시스템 글꼴 우선. 숫자는 tabular */
+  --font: "Pretendard", -apple-system, "Apple SD Gothic Neo", "Malgun Gothic", "Noto Sans KR", sans-serif;
+  --fs-xs: 15px;  /* 상태 글자(badge·why·탭바) 최소 15px (정호 #31, 서연 #33) */
+  --fs-s: 15px;
+  --fs-m: 17px;   /* 본문 기본 (노안) */
+  --fs-l: 20px;   /* 숫자 입력 */
+  --fs-xl: 24px;  /* 화면 제목 */
+  --fs-num: 28px; /* 큰 숫자 */
+
+  /* 간격·크기 */
+  --sp-1: 4px; --sp-2: 8px; --sp-3: 12px; --sp-4: 16px; --sp-5: 24px; --sp-6: 32px;
+  --tap: 48px;        /* 최소 터치 */
+  --tap-main: 56px;   /* 확정·승인 */
+  --radius: 10px;
+  --row: 48px;        /* 재고표 한 줄 = 터치 대상 (정호·하늘 합의) */
+}
+
+* { box-sizing: border-box; }
+body.app { font-family: var(--font); color: var(--ink); font-size: var(--fs-m); line-height: 1.45; }
+.num, input.qty, .tnum { font-variant-numeric: tabular-nums; }
+
+/* ── 머리띠 ── */
+.top { background: var(--leaf); color: #fff; padding: 12px 16px; display: flex; align-items: center; gap: 10px; }
+.top .brand { font-weight: 800; font-size: 18px; letter-spacing: -0.3px; }
+.top .store { font-size: var(--fs-s); opacity: .9; }
+.top .date { margin-left: auto; font-size: var(--fs-s); font-weight: 700; background: rgba(255,255,255,.14); padding: 4px 10px; border-radius: 99px; }
+.top .back { color: #fff; text-decoration: none; font-size: 22px; line-height: 1; width: 48px; height: 48px; margin: -12px 0 -12px -12px; display: inline-flex; align-items: center; justify-content: center; }
+
+/* ── 아래 탭바 (확정 버튼 있는 화면에선 숨김) ── */
+.tabbar { display: grid; grid-template-columns: repeat(4, 1fr); background: var(--paper); border-top: 1px solid var(--rule-strong); }
+.tabbar a { min-height: 60px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; font-size: var(--fs-xs); color: var(--ink-2); text-decoration: none; font-weight: 600; }
+.tabbar a .ico { width: 24px; height: 24px; }
+.tabbar a.on { color: var(--leaf); font-weight: 800; box-shadow: inset 0 3px 0 var(--leaf); }
+
+/* ── 본문 ── */
+.body { padding: 16px; background: var(--kraft); flex: 1; }
+h1.title { font-size: var(--fs-xl); margin: 0 0 4px; letter-spacing: -0.5px; }
+.sub { color: var(--ink-2); font-size: var(--fs-s); margin: 0 0 16px; }
+h2.sec { font-size: 18px; margin: 24px 0 8px; display: flex; align-items: baseline; gap: 8px; }
+h2.sec small { font-size: var(--fs-s); color: var(--ink-2); font-weight: 500; }
+
+/* ── 카드 = 종이 한 장 ── */
+.card { background: var(--paper); border: 1px solid var(--rule); border-radius: var(--radius); padding: 16px; margin-bottom: 12px; }
+.card.flat { padding: 0; overflow: hidden; }
+
+/* ── 버튼 ── */
+.btn { display: flex; align-items: center; justify-content: center; gap: 8px; min-height: var(--tap); padding: 0 18px; border-radius: var(--radius); border: 0; font: inherit; font-weight: 800; font-size: var(--fs-m); text-decoration: none; cursor: pointer; }
+.btn.main { background: var(--leaf); color: #fff; min-height: var(--tap-main); width: 100%; font-size: 18px; }
+.btn.line { background: var(--paper); color: var(--leaf); border: 2px solid var(--leaf); }
+.btn.ghost { background: transparent; color: var(--ink-2); border: 1px solid var(--rule-strong); }
+.btn.small { min-height: var(--tap); font-size: var(--fs-s); padding: 0 12px; }
+.btn.block { width: 100%; }
+
+/* ── 아래 고정 행동 막대 ── */
+.action { position: sticky; bottom: 0; background: var(--paper); border-top: 1px solid var(--rule-strong); padding: 10px 16px 14px; }
+.action .hint { font-size: var(--fs-xs); color: var(--ink-2); margin-bottom: 6px; text-align: center; }
+
+/* ── 입력칸 ── */
+.field { display: block; margin-bottom: 12px; }
+.field > span:first-child { display: block; font-size: var(--fs-s); font-weight: 700; margin-bottom: 4px; }
+.input { width: 100%; min-height: var(--tap); border: 2px solid var(--rule-strong); border-radius: 8px; background: #fff; padding: 0 12px; font: inherit; font-size: var(--fs-m); color: var(--ink); }
+.input:focus { outline: 3px solid var(--leaf); outline-offset: 1px; border-color: var(--leaf); }
+input.qty { width: 76px; min-height: var(--tap); text-align: right; font-size: var(--fs-l); font-weight: 800; border: 2px solid var(--rule-strong); border-radius: 8px; background: #fff; padding: 0 10px; color: var(--ink); }
+
+/* ── 상태 표시: 색 + 글자 둘 다 ── */
+.badge { display: inline-flex; align-items: center; gap: 4px; font-size: var(--fs-xs); font-weight: 800; padding: 2px 8px; border-radius: 4px; white-space: nowrap; }
+.badge.check { background: var(--tag); color: var(--ink); }
+.badge.err { background: var(--red); color: #fff; }
+.badge.ai { background: var(--ai-soft); color: var(--ai); border: 1px solid var(--ai); }
+.badge.ok { background: var(--leaf-soft); color: var(--leaf); }
+.ai-says { border-left: 4px solid var(--ai); background: var(--ai-soft); padding: 10px 12px; border-radius: 0 8px 8px 0; font-size: var(--fs-s); }
+.ai-says b.who { color: var(--ai); font-size: var(--fs-xs); display: block; letter-spacing: .3px; }
+
+/* ── 품목 표시: 그림(24px) 또는 분류색 동그라미 ── */
+.it { display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
+.it img, .it .dot { width: 24px; height: 24px; flex: none; }
+.it .dot { border-radius: 50%; color: #fff; font-size: 12px; font-weight: 800; display: inline-flex; align-items: center; justify-content: center; }
+.dot.fruit { background: var(--c-fruit); } .dot.veg { background: var(--c-veg); } .dot.tofu { background: var(--c-tofu); } .dot.dry { background: var(--c-dry); }
+.it .nm { font-weight: 700; }
+.unit { color: var(--ink-2); font-size: var(--fs-xs); font-weight: 500; }
+
+/* ── 종이 재고표 (재고표 확인) ── */
+.sheet { background: var(--sheet); border: 1px solid var(--rule-strong); border-radius: 4px; }
+.sheet .hd, .sheet .row { display: grid; grid-template-columns: 26px 1fr 64px 60px 78px; align-items: center; column-gap: 6px; padding: 0 8px; }
+.sheet .hd { font-size: var(--fs-xs); font-weight: 800; color: var(--ink-2); border-bottom: 2px solid var(--ink); min-height: 32px; }
+.sheet .hd .grp { grid-column: 4 / 6; text-align: center; border-bottom: 1px solid var(--rule-strong); }
+.sheet .row { min-height: var(--row); border-bottom: 1px solid var(--rule); }
+.sheet .no { font-size: 13px; color: var(--ink-2); text-align: right; }
+.sheet .v { text-align: right; font-weight: 800; font-size: 18px; }
+.sheet .v.empty { color: var(--rule-strong); font-weight: 400; }
+.sheet .pen { color: var(--pen); font-size: var(--fs-m); font-weight: 800; }
+.sheet .row.check { background: var(--tag); border-bottom-color: var(--tag-band); box-shadow: inset 6px 0 0 var(--tag-band); }
+.sheet .row.err { background: var(--red-soft); box-shadow: inset 4px 0 0 var(--red); }
+.sheet .row.check .v, .sheet .row.err .v { font-size: 20px; }
+.sheet .why { grid-column: 2 / -1; font-size: var(--fs-xs); font-weight: 700; padding-bottom: 8px; margin-top: -4px; }
+
+.chips { display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap; }
+.chip { min-height: var(--tap); padding: 0 14px; border-radius: 99px; border: 2px solid var(--ink); background: var(--paper); font: inherit; font-weight: 800; font-size: var(--fs-s); display: inline-flex; align-items: center; }
+
+/* ── 일반 표 (발주·매출) ── */
+.tbl { width: 100%; border-collapse: collapse; table-layout: fixed; }
+.tbl th { font-size: var(--fs-xs); color: var(--ink-2); text-align: left; font-weight: 800; padding: 6px 4px; border-bottom: 2px solid var(--ink); }
+.tbl td { padding: 8px 4px; border-bottom: 1px solid var(--rule); vertical-align: middle; }
+.tbl .num { text-align: right; }
+.tbl tr.err td { background: var(--red-soft); }
+.tbl tr.chg td { background: var(--ai-soft); }
+
+/* ── 할 일 순서표 (홈) ── */
+.steps { list-style: none; margin: 0; padding: 0; }
+.steps li { display: grid; grid-template-columns: 36px 1fr auto; gap: 10px; align-items: center; padding: 12px 0; border-bottom: 1px dashed var(--rule-strong); }
+.steps li:last-child { border-bottom: 0; }
+.steps .n { width: 32px; height: 32px; border-radius: 50%; border: 2px solid var(--rule-strong); display: flex; align-items: center; justify-content: center; font-weight: 800; color: var(--ink-2); }
+.steps li.done .n { background: var(--leaf); border-color: var(--leaf); color: #fff; }
+.steps li.done .t { color: var(--ink-2); text-decoration: line-through; }
+.steps li.now .n { background: #fff; border: 3px solid var(--leaf); color: #111; }   /* '지금' = 잎초록 테 (노랑은 확인 필요 전용, 정호 #86-2) */
+.steps li.now .t { font-weight: 800; }
+
+/* ── 알림 띠 ── */
+.alert { border-radius: var(--radius); padding: 12px 14px; margin-bottom: 12px; font-size: var(--fs-s); }
+.alert.err { background: var(--red-soft); border: 2px solid var(--red); }
+.alert.check { background: var(--tag-soft); border: 2px solid var(--tag-band); }
+
+/* ── 문자 ── */
+.sms { background: #fff; border: 1px solid var(--rule); border-radius: 14px 14px 14px 4px; padding: 12px 14px; white-space: pre-wrap; font-size: var(--fs-m); line-height: 1.6; }
+
+/* ── 목록 줄 ── */
+.list a, .list .li { display: flex; align-items: center; gap: 10px; min-height: 52px; padding: 8px 14px; border-bottom: 1px solid var(--rule); color: var(--ink); text-decoration: none; }
+.list a:last-child, .list .li:last-child { border-bottom: 0; }
+.list .end { margin-left: auto; color: var(--ink-2); font-size: var(--fs-s); text-align: right; }
+.muted { color: var(--ink-2); font-size: var(--fs-s); }
+
+/* 반 토글 체크박스판(JS 0): <label class="chip-half"><input type=checkbox name=half_N>반</label> */
+label.chip-half { display: inline-flex; align-items: center; justify-content: center; }
+label.chip-half input { position: absolute; opacity: 0; width: 1px; height: 1px; }
+label.chip-half:has(input:checked) { background: #1f4d2b; border-color: #1f4d2b; color: #fff; }
+label.chip-half:has(input:focus-visible) { outline: 3px solid var(--leaf); outline-offset: 2px; }
+
+/* ── 입력 (하늘) : 숫자 입력·반 토글·고침 표시·아래 고정 막대·상태 화면 ──
+   회의 결정: 터치 48px 이상, 확정 버튼 56px, 반 = 체크박스 칩(칸 4 + 반 = 4반), 색이 아니라 자리+글자로 구별 */
+
+/* 숫자 칸 + 반 칩 한 묶음: [ 4 ][반] */
+.field-num { display: inline-flex; align-items: stretch; gap: 6px; position: relative; }
+.field-num input { width: 84px; min-height: var(--tap); text-align: right; font: inherit; font-size: 22px; font-weight: 800;
+  font-variant-numeric: tabular-nums; color: var(--ink); background: #fff; border: 2px solid var(--rule-strong); border-radius: 8px; padding: 0 10px; }
+.field-num input:focus { outline: 3px solid var(--leaf); outline-offset: 1px; border-color: var(--leaf); }
+.field-num.edited::after { content: "고침"; position: absolute; top: -11px; left: 4px; background: var(--ink); color: #fff;
+  font-size: 13px; font-weight: 800; padding: 1px 7px; border-radius: 3px; line-height: 1.4; }
+/* 반 칩 크기·모양 (켜짐 상태는 위 label.chip-half:has(...) 규칙). 칸은 정수만 inputmode=numeric */
+.chip-half { position: relative; min-width: var(--tap); min-height: var(--tap); border-radius: 8px; border: 2px solid var(--ink); background: var(--paper);
+  font-size: 18px; font-weight: 800; color: var(--ink); cursor: pointer; user-select: none; }
+
+/* 금액 칸: 원 단위 고정, 쉼표는 입력 중 자동(JS 몇 줄), 키패드는 inputmode=numeric */
+.field-money { display: flex; align-items: center; gap: 8px; }
+.field-money input { flex: 1; min-width: 0; min-height: 52px; text-align: right; font: inherit; font-size: 24px; font-weight: 800;
+  font-variant-numeric: tabular-nums; background: #fff; border: 2px solid var(--rule-strong); border-radius: 8px; padding: 0 12px; color: var(--ink); }
+.field-money .won { font-weight: 800; font-size: 18px; }
+
+/* 노란 줄 2단 카드: 위단 = 종이에서 읽은 글자(볼펜 파랑, 굵은 고딕) / 아래단 = 품목 선택 + 재고 */
+.fixrow { background: var(--tag); border: 2px solid #5a4500; box-shadow: inset 6px 0 0 #5a4500; border-radius: var(--radius); padding: 10px 12px 12px 18px; margin-bottom: 10px; }
+.fixrow.err { background: var(--red-soft); border-color: var(--red); box-shadow: inset 6px 0 0 var(--red); }
+.fixrow .read { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.fixrow .read .no { font-size: 13px; font-weight: 800; color: var(--ink); }
+.fixrow .read .pen { color: #1f3f8f; font-size: 20px; font-weight: 800; }
+.fixrow .read .why { width: 100%; font-size: 15px; font-weight: 700; color: var(--ink); }
+.fixrow .edit { display: grid; grid-template-columns: 1fr auto; gap: 8px; margin-top: 8px; align-items: end; }
+.fixrow select { width: 100%; min-height: var(--tap); font: inherit; font-size: 17px; font-weight: 700; border: 2px solid var(--rule-strong); border-radius: 8px; background: #fff; padding: 0 8px; color: var(--ink); }
+.fixrow .zoom { min-height: var(--tap); background: none; border: 0; padding: 0 4px; font: inherit; font-size: 15px; font-weight: 800; color: var(--ink); text-decoration: underline; }
+
+/* 아래 고정 행동 막대: 요약 한 줄 + 56px 버튼. 탭바 대신 들어간다 */
+.bar-action { position: sticky; bottom: 0; z-index: 5; background: var(--paper); border-top: 2px solid var(--ink); padding: 10px 16px calc(12px + env(safe-area-inset-bottom)); }
+.bar-action .sum { display: flex; justify-content: space-between; font-size: 15px; font-weight: 700; margin-bottom: 8px; }
+.bar-action .sum b { font-variant-numeric: tabular-nums; }
+.bar-action .sum .left { color: var(--ink); }
+.bar-action .btn.main { min-height: var(--tap-main); }
+.bar-action .btn.main[aria-disabled="true"] { background: #6f6a5e; }
+
+/* 상태 화면: 로딩(AI 읽는 중) · 빈 상태 · 오류 */
+.state { text-align: center; padding: 28px 16px; }
+.state .pic { width: 72px; height: 72px; margin: 0 auto 12px; display: block; }
+.state h3 { font-size: 20px; margin: 0 0 6px; }
+.state p { font-size: var(--fs-m); color: var(--ink-2); margin: 0 0 16px; }
+.state.err h3 { color: var(--red); }
+.progress-steps { list-style: none; padding: 0; margin: 12px auto 0; max-width: 260px; text-align: left; }
+.progress-steps li { min-height: 36px; display: flex; align-items: center; gap: 8px; font-weight: 700; color: var(--ink-2); }
+.progress-steps li.done { color: var(--ink); }
+.progress-steps li.done::before { content: "✓"; color: var(--leaf); font-weight: 900; width: 18px; }
+.progress-steps li.now { color: var(--ink); }
+.progress-steps li.now::before { content: "…"; width: 18px; }
+.progress-steps li:not(.done):not(.now)::before { content: ""; width: 18px; }
+
+/* "맞아요" (결정 #41): 고치지 않은 노란 줄마다 한 번. 체크박스 라벨, 고치면 JS 3줄이 자동 체크 */
+.chip-ok { position: relative; display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: var(--tap); padding: 0 14px;
+  border-radius: 8px; border: 2px solid var(--ink); background: #fff; font-size: 17px; font-weight: 800; color: var(--ink); cursor: pointer; user-select: none; white-space: nowrap; }
+.chip-ok input { position: absolute; opacity: 0; width: 1px; height: 1px; }
+.chip-ok:has(:checked) { background: #1f4d2b; border-color: #1f4d2b; color: #fff; }
+.chip-ok:has(:focus-visible) { outline: 3px solid var(--leaf); outline-offset: 2px; }
+/* 끝난 노란 줄: 노랑이 옅어지고 왼쪽 띠가 초록 + "확인함" 글자 (색만으로 말하지 않음) */
+.fixrow:has(.chip-ok :checked) { background: #fff8d6; border-color: #1f4d2b; box-shadow: inset 6px 0 0 #1f4d2b; }
+.fixrow .done-mark { display: none; font-size: 15px; font-weight: 800; color: #1f4d2b; margin-left: auto; }
+.fixrow:has(.chip-ok :checked) .done-mark { display: inline; }
+.fixrow .edit { grid-template-columns: 1fr auto auto; }
+.fixrow .edit .lbl { grid-column: 1 / -1; font-size: 15px; font-weight: 700; margin-bottom: -4px; }
+
+/* 남은 노란 줄 세기: CSS counter (JS 0). 안 켜진 .fixrow만 센다 → 아래 막대에 글자로 */
+.review-form { counter-reset: left; }
+.review-form .fixrow:not(.err):not(:has(.chip-ok :checked)) { counter-increment: left; }
+.bar-action .left-count::before { content: "노란 줄 " counter(left) "개 남음"; }
+/* 기본 = 확정 버튼 보임 (정호 #44: :has 못 읽는 구형 브라우저에서도 마감 가능. 마지막 안전망은 서버 경고)
+   :has를 읽는 브라우저에서만, 확인 안 한 노란 줄이 있으면 확정을 숨기고 "남은 줄로" 56px 버튼을 보인다 */
+.review-form .go-left, .review-form .left-count { display: none; }
+.review-form:has(.fixrow .chip-ok input:not(:checked)) .go-left { display: flex; }
+.review-form:has(.fixrow .chip-ok input:not(:checked)) .left-count { display: inline; }
+.review-form:has(.fixrow .chip-ok input:not(:checked)) .btn.confirm { display: none; }
+.btn.go { background: var(--tag); color: var(--ink); border: 2px solid #5a4500; min-height: var(--tap-main); width: 100%; font-size: 18px; }
+
+/* 선 아이콘(Lucide) = CSS mask: 글자색을 따라가서 탭 켜짐/꺼짐이 색+굵기로 보임 */
+.ico-m { display: inline-block; width: 24px; height: 24px; flex: none; background: currentColor;
+  -webkit-mask: var(--i) center / contain no-repeat; mask: var(--i) center / contain no-repeat; }
+.tabbar a .ico-m { width: 26px; height: 26px; }
+.tabbar a { font-size: 15px; }
+
+.tips { margin: 0; padding-left: 20px; font-size: var(--fs-m); line-height: 1.7; }
+.photo-prev { height: 150px; border-radius: 8px; margin: 0 auto 14px; max-width: 220px; background: repeating-linear-gradient(#fffef8 0 17px, #d8cfbd 17px 18px);
+  border: 1px solid var(--rule-strong); display: flex; align-items: center; justify-content: center; transform: rotate(-2deg); }
+.photo-prev span { background: #fffef8; padding: 2px 8px; font-size: 15px; color: var(--ink-2); }
+
+.ink { color: var(--ink); } .red-t { color: var(--red-ink); }
+.photo-link { color: var(--ink); font-weight: 700; text-decoration: underline; display: inline-block; padding: 12px 0; margin: -12px 0; }
+
+/* 노란 2단 카드 아래단: 1줄 = 품목 선택(꽉), 2줄 = [수량][반] ··· [맞아요] */
+.fixrow .edit { grid-template-columns: 1fr auto; }
+.fixrow .edit select { grid-column: 1 / -1; }
+.fixrow .edit .chip-ok { justify-self: end; }
+.fixrow .edit.buy { grid-template-columns: auto 1fr; }
+.fixrow .edit.buy .chip-ok { grid-column: 1 / -1; justify-self: end; }
+.field-money.sm input { font-size: 20px; min-height: var(--tap); }
+.chip-ok.as-btn { background: #fff; }
+.card .total { margin: 12px 0 0; padding-top: 10px; border-top: 1px dashed var(--rule-strong); display: flex; justify-content: space-between; font-weight: 700; }
+.card .total b { font-size: 22px; font-variant-numeric: tabular-nums; }
+
+/* 종이 재고표 읽기 줄 = 링크 한 줄 48px (누르면 그 줄 편집) */
+.sheet a.row { color: var(--ink); text-decoration: none; }
+.sheet .r, .sheet .hd .r { text-align: right; }
+
+
+/* 발주 경고 카드: 빨강, 두 선택지 모두 56px. "고침"이 왼쪽(엄지 쪽 아님에도 주 버튼) */
+.warn-card { background: var(--red-soft); border: 2px solid var(--red); box-shadow: inset 6px 0 0 var(--red); border-radius: var(--radius); padding: 12px 12px 12px 18px; margin-bottom: 14px; }
+.warn-card .wt { display: flex; align-items: center; gap: 8px; font-size: 20px; font-weight: 700; color: var(--red-ink); }
+.warn-card p { margin: 6px 0 10px; font-size: var(--fs-m); }
+.warn-card .two { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.warn-card .two .btn { min-height: var(--tap-main); font-size: 17px; }
+
+/* 발주 거래처 목록: 품목 | 남음 | 추천 | [발주][반] */
+.olist .oh, .olist .orow { display: grid; grid-template-columns: 1fr 40px 40px auto; align-items: center; column-gap: 8px; padding: 0 12px; }
+.olist .oh { min-height: 36px; font-size: 15px; font-weight: 700; color: var(--ink-2); border-bottom: 2px solid var(--ink); }
+.olist .oh .r { text-align: right; }
+.olist .orow { min-height: 64px; border-bottom: 1px solid var(--rule); }
+.olist .orow:last-child { border-bottom: 0; }
+.olist .orow .nm { font-weight: 700; }
+.olist .orow .v { text-align: right; font-size: 18px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.olist .orow.chg { background: var(--ai-soft); box-shadow: inset 4px 0 0 var(--ai); }
+.olist .field-num input { width: 64px; }
+
+/* 문자: 인사말 스위치 · 보낸 쪽지 */
+.switch-row { display: flex; align-items: center; justify-content: space-between; min-height: var(--tap); margin-bottom: 8px; font-weight: 700; }
+.sw { position: relative; width: 56px; height: 32px; }
+.sw input { position: absolute; inset: 0; opacity: 0; margin: 0; }
+.sw i { position: absolute; inset: 0; border-radius: 99px; background: #fff; border: 2px solid var(--rule-strong); }
+.sw i::after { content: ""; position: absolute; top: 3px; left: 3px; width: 22px; height: 22px; border-radius: 50%; background: var(--rule-strong); }
+.sw input:checked + i { background: var(--leaf); border-color: var(--leaf); }
+.sw input:checked + i::after { left: 27px; background: #fff; }
+.note .sent-mark { margin-left: auto; font-size: 15px; font-weight: 700; color: var(--leaf); white-space: nowrap; }
+.note .acts .btn.line { gap: 6px; }
+.note .to { flex-wrap: wrap; }
+.note .to small { flex-basis: 100%; order: 3; }
+/* 노란 카드 위 "확인" 글자칩: 노랑 위 노랑은 안 보임 → 진한 띠색 바탕 + 흰 글자 */
+.fixrow .badge.check { background: var(--tag-band); color: #fff; }
+
+/* 재고표 확인·발주 추가 (하늘, 결정 #50·#51) */
+.fixrow .buy3 { grid-column: 1 / -1; display: grid; grid-template-columns: auto 1fr; gap: 2px 8px; align-items: end; }
+.fixrow .buy3 .lbl { font-size: 15px; font-weight: 700; grid-column: auto; margin: 0; }
+.fixrow .buy3 .field-money { min-width: 0; }
+.fixrow .buy3 .field-money input { width: 100%; }
+.fixrow .edit.two { grid-template-columns: auto 1fr; }
+.fixrow .edit.two .chip-ok { justify-self: start; }
+.fixrow .nm-b { font-size: 20px; font-weight: 700; }
+.fixrow.in-list { margin: 8px; }
+.fixrow .vs { font-size: 17px; margin-top: 6px; font-variant-numeric: tabular-nums; }
+.fixrow .vs b { font-weight: 700; }
+.fixrow .vs b.big { font-size: 22px; }
+.fixrow .edit.two .btn.main { min-height: var(--tap); width: auto; font-size: 17px; }
+.fixrow .edit.two:has(.btn.main) { grid-template-columns: 1fr 1fr; }
+.fixrow .edit.two:has(.btn.main) .chip-ok { justify-self: stretch; }
+.tagcard .chg .was { font-size: 17px; font-weight: 400; color: var(--ink-2); }
+.tagcard .why { font-size: 17px; }
+.sheet .row.done { background: #fff8d6; box-shadow: inset 6px 0 0 #1f4d2b; }
+.sheet .row.more { min-height: 40px; }
+.note .acts.three { grid-template-columns: 1fr auto auto; }
+.note .acts .btn { min-height: var(--tap); }
+.note .acts .chip-ok { padding: 0 12px; }
+#order .bar-action .left-count::before { content: "확인할 숫자 " counter(left) "개"; }
+/* 빨강 = 저장 불가 (결정 #64): 빨간 줄이 남으면 확정·노란줄 버튼 대신 "빨간 줄 고쳐야 확정" 하나만. :has 못 읽으면 확정 보임 → 서버가 막음 */
+.review-form .go-err { display: none; background: var(--red); color: #fff; min-height: var(--tap-main); width: 100%; font-size: 18px; }
+.review-form:has(.fixrow.err) .go-err { display: flex; }
+.review-form:has(.fixrow.err) .bar-action .btn.go-left, .review-form:has(.fixrow.err) .bar-action .btn.confirm { display: none; }
+.fixrow select.need { border-color: var(--red); color: var(--red-ink); }
+/* 확정 직전 마지막 문장 (정호 #66-4): 15px 굵게, 남은 수 17px */
+.bar-action .sum { font-size: 15px; font-weight: 700; }
+.bar-action .sum b, .bar-action .left-count { font-size: 17px; }
+
+/* ── 주제 (민재) : 청과 가게가 보이는 자리. 공간 0 또는 그 카드 안에서만. 글자·숫자 대비는 위 토큰 그대로 ──
+   차양막(머리띠 밑) · 봉투 카드(홈 오늘 할 일) · 가격표 카드(발주 바뀐 품목) · 주문 쪽지(문자) · 좌판(로그인) · 분류 네모 */
+
+/* 가게 앞 차양막 줄무늬: 머리띠에만 (탭바·고정 막대 금지, 하늘 #23) */
+.top { position: relative; }
+.top::after { content: ""; position: absolute; left: 0; right: 0; bottom: -6px; height: 6px; pointer-events: none;
+  background: repeating-linear-gradient(90deg, var(--leaf) 0 12px, #f6f1e6 12px 24px);
+  -webkit-mask: radial-gradient(6px 6px at 6px 0, #000 98%, transparent) 0 0 / 12px 6px repeat-x;
+          mask: radial-gradient(6px 6px at 6px 0, #000 98%, transparent) 0 0 / 12px 6px repeat-x; }
+@supports not ((mask: none) or (-webkit-mask: none)) { .top::after { -webkit-mask: none; mask: none; } }
+.top + * { margin-top: 6px; }
+.top .store-name { font-weight: 700; font-size: 18px; letter-spacing: -0.3px; }  /* 머리띠 = 가게 간판 */
+
+/* 종이봉투 카드: 홈 '오늘 할 일' 하나만. 바탕 #d9c4a0 위 #111 = 11.1:1, 흰 글자 금지 */
+.bag { position: relative; background: var(--bag); color: #111; border-radius: 4px 4px var(--radius) var(--radius); padding: 22px 16px 16px; margin: 4px 0 16px;
+  box-shadow: inset 0 -1px 0 rgba(0,0,0,.08); }
+.bag::before { content: ""; position: absolute; left: 0; right: 0; top: -7px; height: 8px;   /* 봉투 윗단 톱니 (위 가장자리만, 하늘 #32) */
+  background: linear-gradient(135deg, var(--bag) 33%, transparent 34%) 0 0 / 12px 8px repeat-x,
+              linear-gradient(225deg, var(--bag) 33%, transparent 34%) 0 0 / 12px 8px repeat-x; }
+.bag .fold { position: absolute; left: 0; right: 0; top: 10px; border-top: 1px dashed rgba(17,17,17,.25); }  /* 접힌 선 */
+.bag .head { display: flex; align-items: flex-start; gap: 10px; }
+.bag .day { font-size: 28px; font-weight: 700; letter-spacing: -0.6px; line-height: 1.15; font-variant-numeric: tabular-nums; }
+.bag .what { font-size: 18px; font-weight: 700; margin-top: 4px; }
+.bag .pics { margin-left: auto; display: flex; gap: 2px; flex: none; }
+.bag .pics img { width: 28px; height: 28px; }
+.bag p { font-size: var(--fs-m); margin: 8px 0 14px; }
+.bag .btn.main { margin-top: 4px; }  /* 버튼: 카드 맨 아래 꽉 찬 폭 56px, 진초록+흰 9.75:1 */
+
+/* 가격표 카드: 발주 '바뀐 품목'. 왼쪽 끈 구멍 + 그림 32px + 숫자 22px */
+.tagcard { position: relative; display: grid; grid-template-columns: 32px 1fr auto; gap: 4px 10px; align-items: center;
+  background: var(--paper); border: 1px solid var(--rule-strong); border-radius: 6px 14px 14px 6px; padding: 12px 14px 12px 30px; margin-bottom: 10px; }
+.tagcard::before { content: ""; position: absolute; left: 10px; top: 50%; width: 10px; height: 10px; margin-top: -5px; border-radius: 50%;
+  background: #8a6a3e; border: 0; }   /* 끈 구멍: 꽉 찬 점 (빈 원은 라디오로 보임, 정호 #55-2) */
+.tagcard::after { content: ""; position: absolute; left: -14px; top: 50%; width: 26px; border-top: 2px solid #b08d57; transform: rotate(-18deg); } /* 노끈 */
+.tagcard img, .tagcard .sq { width: 32px; height: 32px; grid-row: span 2; }
+.tagcard .nm { font-weight: 700; font-size: 18px; }
+.tagcard .chg { font-size: 22px; font-weight: 700; font-variant-numeric: tabular-nums; text-align: right; white-space: nowrap; }
+.tagcard .chg s, .tagcard .chg .old { color: var(--ink-2); font-weight: 400; font-size: 17px; text-decoration: none; }  /* 취소선 금지, 크기로 구별 (정호 #48) */
+.tagcard .why { grid-column: 2 / -1; font-size: var(--fs-m); color: var(--ink); }  /* 승인 전에 읽는 본문 17px */
+
+/* 주문 쪽지: 문자 화면 거래처 하나 = 쪽지 한 장. 머리 괘선 2줄 + 아래 뜯긴 자국 */
+.note { position: relative; background: var(--paper); border: 1px solid var(--rule); border-bottom: 0; border-radius: 6px 6px 0 0; padding: 14px 16px 18px; margin-bottom: 22px; }
+.note::after { content: ""; position: absolute; left: -1px; right: -1px; bottom: -8px; height: 8px;
+  background: linear-gradient(-45deg, transparent 33%, var(--paper) 34%) 0 0 / 10px 8px repeat-x,
+              linear-gradient(45deg, transparent 33%, var(--paper) 34%) 0 0 / 10px 8px repeat-x; }
+.note .to { font-size: 20px; font-weight: 700; padding-bottom: 6px; border-bottom: 3px double var(--rule-strong); margin-bottom: 10px; display: flex; align-items: baseline; gap: 8px; }
+.note .to small { font-size: var(--fs-s); color: var(--ink-2); font-weight: 400; }
+.note .body-text { white-space: pre-wrap; font-size: var(--fs-m); line-height: 1.7;
+  background: repeating-linear-gradient(transparent 0 calc(1.7em - 1px), var(--rule) calc(1.7em - 1px) 1.7em); }  /* 쪽지 괘선 */
+.note .acts { display: grid; grid-template-columns: 1fr auto; gap: 8px; margin-top: 12px; }
+
+/* 로그인 좌판: 크라프트 판자 3줄 위에 그림 수북이 */
+.stall { position: relative; padding: 18px 12px 0; text-align: center; }
+.stall .heap { display: flex; justify-content: center; align-items: flex-end; flex-wrap: wrap; gap: 0 2px; max-width: 300px; margin: 0 auto -10px; position: relative; z-index: 1; }
+.stall .heap img { width: 48px; height: 48px; }
+.stall .heap img:nth-child(even) { transform: translateY(6px) rotate(-8deg); }
+.stall .heap img:nth-child(3n) { transform: rotate(10deg); }
+.stall .crate { height: 54px; border-radius: 4px; max-width: 320px; margin: 0 auto;
+  background: repeating-linear-gradient(180deg, #c49a62 0 16px, #8a6a3e 16px 18px);
+  box-shadow: inset 6px 0 0 #8a6a3e, inset -6px 0 0 #8a6a3e; }
+.stall .label { display: inline-block; margin-top: -40px; position: relative; z-index: 2; background: #fffef8; color: #111; border: 1px solid #8a6a3e;
+  font-weight: 700; font-size: 15px; padding: 2px 10px; border-radius: 3px; transform: rotate(-2deg); }
+
+/* 분류 네모: 맞는 그림 없는 품목 (글자 없음, 장식). items_map.md 참고 */
+.sq { display: inline-block; width: 24px; height: 24px; border-radius: 5px; flex: none; }
+.sq.fruit { background: #e08a2e; } /* 감 주황: 오류 빨강과 안 겹치게 (정호 #48) */ .sq.veg { background: var(--c-veg); } .sq.tofu { background: var(--bag); box-shadow: inset 0 0 0 2px var(--c-tofu); } .sq.dry { background: var(--c-dry); }
+
+/* 홈·가게 고르기·로그인 부품 (민재) */
+.bag .yl { display: flex; flex-wrap: wrap; gap: 4px 14px; margin: 12px 0 14px; }          /* 노란 줄 품목: 무엇을 고칠지 미리 보임 */
+.bag .yl span { display: inline-flex; align-items: center; gap: 5px; font-size: var(--fs-s); font-weight: 700; color: #111; }  /* 테두리·흰 바탕 없음 = 못 누르는 글자 (정호 #86-1, #55) */
+.bag .yl img, .bag .yl .sq { width: 24px; height: 24px; }
+.steps.card { padding: 4px 16px; }
+.steps li { min-height: var(--tap); }
+.memos .memo { display: grid; grid-template-columns: 52px 28px 1fr; gap: 10px; align-items: center; padding: 10px 14px; border-bottom: 1px solid var(--rule); min-height: 56px; }
+.memos .md { display: flex; flex-direction: column; align-items: center; line-height: 1.2; font-size: var(--fs-s); color: var(--ink-2);
+  border: 1px solid var(--rule-strong); border-radius: 4px; padding: 3px 0; background: #fffef8; }   /* 장부 날짜 칸 */
+.memos .md b { color: var(--ink); font-size: 15px; }
+.memos img.wx, .memos span.wx { width: 28px; height: 28px; }
+.memos .memo-add { display: grid; grid-template-columns: 1fr 72px; gap: 8px; padding: 10px 14px; }
+.memos .memo-add .btn { min-width: 72px; white-space: nowrap; }  /* "추/가" 꺾임 방지 (정호 #52-3) */
+.sales .sale { display: grid; grid-template-columns: auto 1fr; gap: 2px 10px; align-items: baseline; padding: 10px 14px; border-bottom: 1px solid var(--rule); }
+.sales .sale:last-child { border-bottom: 0; }
+.sales .d { font-size: var(--fs-s); color: var(--ink-2); font-weight: 700; }
+.sales .a { font-size: 22px; text-align: right; }
+.sales .r { grid-column: 1 / -1; font-size: var(--fs-s); color: var(--ink); text-align: right; }
+.sales .minus { color: var(--ink); }   /* 덜 들어옴 = 오류 아님 → 빨강 금지, 부호+글자로 (정호 #89-c). 한국은 빨강=오름이라 색으로 +/- 표시도 헷갈림 */
+.signs { display: grid; gap: 12px; margin-bottom: 8px; }
+.sign { position: relative; display: grid; grid-template-columns: 1fr auto; gap: 2px 8px; background: var(--paper); border: 1px solid var(--rule-strong);
+  border-radius: 6px; padding: 22px 14px 12px; color: var(--ink); text-decoration: none; min-height: 72px; overflow: hidden; }
+.sign .awn { position: absolute; left: 0; right: 0; top: 0; height: 10px; background: repeating-linear-gradient(90deg, var(--leaf) 0 12px, #f6f1e6 12px 24px); }
+.sign .nm { font-size: 20px; font-weight: 700; }
+.sign .meta { grid-column: 1; font-size: var(--fs-s); color: var(--ink-2); }
+.sign .go { grid-column: 2; grid-row: 1 / span 2; align-self: center; font-size: var(--fs-s); font-weight: 700; color: var(--leaf); }
+.login-body { padding-top: 24px; }
+
+/* ── 화면 부품 (유진) : 민재 '주제' 구역과 겹치는 것(.top::after .bag .note .stall .sq .tagcard)은 거기 것을 쓴다 ── */
+.ico { width: 24px; height: 24px; flex: none; }
+img.pic { width: 24px; height: 24px; flex: none; }
+img.pic.big { width: 44px; height: 44px; }
+.list .sq, .list img.pic { margin-right: 2px; }
+
+/* 재고표 올리기: 큰 촬영 버튼 = file input 라벨 (JS 0, capture=environment, 고르면 바로 올림) */
+.shoot { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; min-height: 168px; background: var(--leaf); color: #fff; border-radius: var(--radius); margin-bottom: 12px; cursor: pointer; text-align: center; position: relative; }
+.shoot input { position: absolute; opacity: 0; width: 1px; height: 1px; }
+.shoot b { font-size: 22px; } .shoot span { font-size: var(--fs-s); }
+.tips { margin: 6px 0 0; padding-left: 20px; } .tips li { margin: 4px 0; }
+
+/* 체크 줄: 라벨 전체 48px (보냄·인사말·확인) */
+.check-line { display: flex; align-items: center; gap: 10px; min-height: var(--tap); font-weight: 700; cursor: pointer; }
+.check-line input { width: 26px; height: 26px; accent-color: var(--leaf); flex: none; }
+
+/* 더보기·설정·품목 편집·입고·가게 관리·AI 기록 */
+.grp-sum { min-height: 56px; display: flex; align-items: center; gap: 10px; padding: 0 16px; cursor: pointer; font-size: 18px; }
+.grp-sum .muted { margin-left: auto; }
+.chip { min-height: var(--tap); min-width: var(--tap); justify-content: center; }
+.chip.on { background: var(--leaf); border-color: var(--leaf); color: #fff; }
+.item-hero { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
+.two { display: grid; grid-template-columns: 1fr 120px; gap: 10px; }
+.lg-t { width: 58px; flex: none; white-space: nowrap; font-weight: 700; font-variant-numeric: tabular-nums; }
+.logs a.bad { box-shadow: inset 4px 0 0 var(--red); }
+.tbl .field-num input { width: 64px; font-size: 20px; }
+.sheet .nm { font-weight: 700; overflow-wrap: anywhere; }
+.recv td:first-child { overflow-wrap: anywhere; }
+.more-menu a { min-height: 56px; font-size: 18px; font-weight: 700; }
+.stat { display: grid; grid-template-columns: repeat(3, 1fr); text-align: center; gap: 8px; }
+.stat b { display: block; font-size: 22px; font-variant-numeric: tabular-nums; }
+.stat span { font-size: var(--fs-s); color: var(--ink-2); }
+
+/* 기다림 화면: 봉투 카드에 담기는 중 (민재, 서연 #49-3) */
+.bag.wait .day { font-size: 24px; }
+.bag.wait .what { font-size: var(--fs-m); font-weight: 400; margin: 2px 0 10px; }
+.bag.wait .scale { display: flex; justify-content: center; align-items: flex-end; gap: 4px; margin: 6px 0 4px; }
+.bag.wait .scale img { width: 40px; height: 40px; }
+.bag.wait .scale img:first-child { width: 56px; height: 56px; }
+.bag.wait .scale img:not(:first-child) { animation: drop 1.6s ease-in infinite; }
+.bag.wait .scale img:last-child { animation-delay: .8s; }
+@keyframes drop { 0% { transform: translateY(-14px); opacity: 0; } 30%, 80% { transform: none; opacity: 1; } 100% { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .bag.wait .scale img { animation: none !important; } }
+.bag.wait .progress-steps { max-width: none; }
+.bag.wait .progress-steps li { color: #3b2a14; font-size: var(--fs-m); min-height: 40px; }   /* 봉투 위 6.4:1 이상 */
+.bag.wait .progress-steps li.done, .bag.wait .progress-steps li.now { color: #111; }
+.bag.wait .progress-steps li.done::before { color: var(--leaf); }
+/* 4b 재고표 읽는 중 = 같은 봉투, 그림 자리에 고른 사진 (민재 #78, 정호 #71: 120px 이상 + 다른 사진으로 48px 봉투 안 맨 아래) */
+.bag.wait .photo-prev { height: 140px; max-width: 240px; margin: 6px auto 10px; box-shadow: 0 2px 0 rgba(17,17,17,.18); }
+.bag.wait > .btn { margin-top: 12px; }
+
+/* 장날 표시: 시장 도장 느낌 글자칩 (민재, 서연 #54-3). 그림 아님, 상태색(노랑·빨강·보라) 안 씀 */
+.jang { display: inline-block; font-size: 15px; font-weight: 700; color: var(--leaf); border: 2px solid var(--leaf); border-radius: 4px;
+  padding: 0 5px; line-height: 1.35; transform: rotate(-4deg); margin-left: 4px; }
+
+/* 안건 6 (유진): 더보기 56px 줄 · 로그아웃 따로 · 단위 칸 밖 · 되돌릴 수 없는 버튼 */
+.more-menu a { min-height: 64px; font-size: var(--fs-m); font-weight: 700; }
+.more-menu a .muted { font-weight: 400; }
+.logout { margin-top: 32px; display: flex; align-items: center; gap: 12px; }
+.num-unit { display: flex; align-items: center; gap: 10px; }
+.num-unit > b { font-size: 18px; }
+.btn.danger { background: var(--paper); color: var(--red); border: 2px solid var(--red); }
+.danger-zone { margin-top: 40px; padding-top: 16px; border-top: 1px dashed var(--rule-strong); display: grid; gap: 6px; }
+.grp[open] > .grp-sum { border-bottom: 3px double var(--rule-strong); }
+.logs .end { color: var(--ink); font-size: var(--fs-s); }
+.lg-w { min-width: 0; }
+.recv-note { padding: 14px 10px 10px; }
+.recv-note .to { margin: 0 4px 4px; }
+.recv .it { gap: 6px; align-items: flex-start; } .recv .it .pic, .recv .it .sq { margin-top: 2px; }
+b.who { font-size: var(--fs-m); }
+.badge.role { background: var(--kraft); color: var(--ink-2); } /* 테두리 없음: 누르는 버튼처럼 안 보이게 (정호 #55) */
+/* 접는 줄(details) 머리 = 누를 자리 48px 이상 (유진 #73, 하늘). 카드 안쪽 여백까지 누르게 줄 전체로 */
+details.card { padding-top: 0; padding-bottom: 0; }
+details.card > summary { min-height: var(--tap); padding: 12px 0; box-sizing: border-box; line-height: 24px; cursor: pointer; }
+details.card[open] > summary { border-bottom: 1px solid var(--rule); margin-bottom: 10px; }
+/* 품목·설정 거래처 묶음: 위 summary 공통(padding 12px 0)이 안쪽 여백을 0으로 덮던 것 복구 (정호 #89-f) + 접힘/펼침 표시 */
+details.card.grp > summary.grp-sum { padding: 12px 16px; list-style: none; }
+details.card.grp > summary.grp-sum::-webkit-details-marker { display: none; }
+details.card.grp > summary.grp-sum::after { content: "›"; font-size: 24px; font-weight: 700; color: var(--ink-2); transform: rotate(90deg); flex: none; width: 16px; text-align: center; }
+details.card.grp[open] > summary.grp-sum::after { transform: rotate(-90deg); }
+/* 한국어 줄바꿈은 낱말 단위 ("3박/스 품절", "남/음" 같은 끊김 방지). 표 품목 칸은 위 overflow-wrap:anywhere 가 받친다 */
+body.app { word-break: keep-all; overflow-wrap: break-word; }
+/* 못 읽은 줄(빈칸) = [맞아요] 없음, 숫자를 넣으면 자동 확인 (결정 #84). 빈칸에 "맞아요"는 거짓 확인 */
+.review-form .fixrow.need-num:has(.field-num input[inputmode]:not(:placeholder-shown)) { counter-increment: none; background: #fff8d6; border-color: #1f4d2b; box-shadow: inset 6px 0 0 #1f4d2b; }
+.fixrow.need-num:has(.field-num input[inputmode]:not(:placeholder-shown)) .done-mark { display: inline; }
+.review-form:not(:has(.fixrow.err)):has(.fixrow.need-num .field-num input[inputmode]:placeholder-shown) .go-left { display: flex; }
+.review-form:has(.fixrow.need-num .field-num input[inputmode]:placeholder-shown) .left-count { display: inline; }
+.review-form:not(:has(.fixrow.err)):has(.fixrow.need-num .field-num input[inputmode]:placeholder-shown) .btn.confirm { display: none; }
+/* 빨간 줄이 남으면 위 need-num 규칙보다 이긴다: 막대 버튼은 "빨간 줄 고쳐야 확정" 하나만 */
+.review-form:has(.fixrow.err) .bar-action .btn.go-left.go, .review-form:has(.fixrow.err) .bar-action .btn.main.confirm { display: none; }
+/* 노란 카드(#ffd84d) 안 입력칸 테두리 = 띠색 #5a4500 (6.64:1). #8a7a62 는 노랑 위 3.01 이라 햇빛에 녹음 (정호 #86-3) */
+.fixrow:not(.err) select, .fixrow:not(.err) .field-num input[inputmode], .fixrow:not(.err) .field-money input { border-color: var(--tag-band); }
+/* 발주 표 AI가 바꾼 줄: 보라 바탕만으로 말하지 않음 → 이름 밑 "AI 추천 2→4" 글자칩 (정호 #89-d) */
+.olist .orow.chg .nm .badge.ai { display: table; margin-top: 4px; }
+/* 한글 가짜 기울임 금지 (정호 #89-e): em 은 굵기로만 */
+body.app em { font-style: normal; font-weight: 700; }
+
+/* ═════════ 실제 앱에만 있는 것 (목업의 휴대폰 틀 대신) ═════════ */
+html { background: #e9e0cf; }
+body.app { margin: 0; background: #e9e0cf; }
+/* 휴대폰은 화면 전체, PC에서는 가운데 휴대폰 폭 한 줄 */
+.shell { max-width: 480px; min-height: 100vh; margin: 0 auto; display: flex; flex-direction: column; background: var(--kraft); }
+@media (min-width: 520px) { .shell { box-shadow: 0 0 0 1px var(--rule), 0 8px 30px rgba(28,26,23,.12); } }
+.shell > form.screen-form { display: flex; flex-direction: column; flex: 1; }
+.tabbar { position: sticky; bottom: 0; z-index: 4; padding-bottom: env(safe-area-inset-bottom); }
+.tabbar a .ico { width: 26px; height: 26px; }
+.top .date.late { background: #fff; color: var(--red-ink); box-shadow: inset 0 0 0 2px var(--red); }
+.top .store-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.top .date { flex: none; }
+.top a.store-name { color: #fff; text-decoration: none; }
+.body > :last-child { margin-bottom: 0; }
+.body { padding-bottom: 24px; }
+.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+form.inline { display: inline; margin: 0; }
+button.link-like { background: none; border: 0; padding: 0; font: inherit; color: inherit; cursor: pointer; text-align: inherit; }
+.alert form { margin-top: 10px; }
+.alert b { font-weight: 800; }
+.note-ok { background: var(--leaf-soft); border: 2px solid var(--leaf); border-radius: var(--radius); padding: 12px 14px; margin-bottom: 12px; font-size: var(--fs-s); font-weight: 700; }
+
+/* 기다림 화면 = 봉투 카드 (화면 위에 덮는다) */
+#loading { display: none; position: fixed; inset: 0; z-index: 20; background: rgba(243,236,224,.97); overflow: auto; }
+#loading.on { display: block; }
+#loading .wrap { max-width: 480px; margin: 0 auto; padding: 40px 16px 24px; }
+#loading .photo-prev { background-size: cover; background-position: center; }
+#loading .photo-prev.has-img span { display: none; }
+
+/* 홈 가게 메모: 줄을 누르면 [AI 확인][지우기] */
+.memos details.memo-d > summary { list-style: none; cursor: pointer; }
+.memos details.memo-d > summary::-webkit-details-marker { display: none; }
+.memos details.memo-d[open] > summary { border-bottom: 0; }
+.memos .memo-acts { display: flex; gap: 8px; padding: 0 14px 12px 76px; border-bottom: 1px solid var(--rule); flex-wrap: wrap; }
+.memos .memo-add { grid-template-columns: 1fr 72px; }
+.memos .memo-add .when { grid-column: 1 / -1; display: flex; align-items: center; gap: 8px; font-size: var(--fs-s); color: var(--ink-2); font-weight: 700; }
+.memos .memo-add .when select { min-height: var(--tap); }
+.memos .wx { display: inline-block; }
+.memos .mt { min-width: 0; }
+
+/* 가게 고르기 간판: 버튼으로 (가게 바꾸기는 POST) */
+form.sign-form { margin: 0; }
+form.sign-form button.sign { width: 100%; text-align: left; font: inherit; cursor: pointer; }
+
+/* 재고표 확인: 종이 순서 줄을 누르면 그 줄 입력칸이 펼쳐진다 (JS 0, details) */
+.sheet details.line > summary { list-style: none; cursor: pointer; }
+.sheet details.line > summary::-webkit-details-marker { display: none; }
+.sheet details.line > .row-edit { padding: 8px 10px 12px 40px; background: #fffef8; border-bottom: 1px solid var(--rule); display: grid; gap: 8px; }
+.sheet details.line[open] > summary.row { background: var(--leaf-soft); }
+.sheet .row-edit select { width: 100%; min-height: var(--tap); font: inherit; font-size: 17px; font-weight: 700; border: 2px solid var(--rule-strong); border-radius: 8px; background: #fff; padding: 0 8px; color: var(--ink); }
+.sheet .row-edit .buy3 { display: grid; grid-template-columns: auto 1fr; gap: 2px 8px; align-items: end; }
+.sheet .row-edit .buy3 .lbl { font-size: 15px; font-weight: 700; }
+.sheet:not(.with-buy) .hd, .sheet:not(.with-buy) .row { grid-template-columns: 26px 1fr 78px; }
+.sheet .nm .unit { margin-left: 2px; }
+.add-rows { margin-top: 10px; }
+.add-rows > summary { list-style: none; }
+.add-rows > summary::-webkit-details-marker { display: none; }
+.add-rows .add-row { display: grid; gap: 8px; padding: 10px 0; border-bottom: 1px dashed var(--rule-strong); }
+.add-rows .add-row:last-child { border-bottom: 0; }
+.add-rows select { width: 100%; min-height: var(--tap); font: inherit; font-size: 17px; font-weight: 700; border: 2px solid var(--rule-strong); border-radius: 8px; background: #fff; padding: 0 8px; }
+.field-num input::placeholder { color: var(--rule-strong); font-weight: 400; }
+
+/* 발주: 추천 0 품목은 접어 둔다 */
+.olist .orow .nm { min-width: 0; overflow-wrap: anywhere; }
+.olist .field-num input { width: 72px; }
+details.zero-lines > summary { padding: 12px 12px; min-height: var(--tap); font-weight: 700; cursor: pointer; }
+
+/* 품목·설정: 거래처 줄 편집 */
+.sup-row { padding: 12px 14px; border-bottom: 1px solid var(--rule); display: grid; gap: 8px; }
+.sup-row:last-child { border-bottom: 0; }
+.sup-row .two-btn { display: flex; gap: 8px; }
+.sup-row .two-btn .btn { flex: 1; }
+.chips input { position: absolute; opacity: 0; width: 1px; height: 1px; }
+.chips label.chip { cursor: pointer; position: relative; }
+.chips label.chip:has(input:checked) { background: var(--leaf); border-color: var(--leaf); color: #fff; }
+.chips label.chip:has(input:focus-visible) { outline: 3px solid var(--leaf); outline-offset: 2px; }
+.chips label.chip:has(input:disabled) { cursor: default; }
+.layout-opt { display: flex; gap: 10px; align-items: flex-start; padding: 12px; border: 2px solid var(--rule); border-radius: var(--radius); margin-bottom: 8px; cursor: pointer; background: #fff; }
+.layout-opt:has(input:checked) { border-color: var(--leaf); background: var(--leaf-soft); }
+.layout-opt input { width: 22px; height: 22px; accent-color: var(--leaf); margin-top: 2px; flex: none; }
+.money-input { text-align: right; font-weight: 800; font-variant-numeric: tabular-nums; }
+textarea.input { padding: 10px 12px; line-height: 1.6; min-height: 120px; }
+select.input { padding: 0 10px; }
+
+/* 거래처 문자 */
+.note .acts .btn .ico { width: 20px; height: 20px; }
+.note.sent .acts .btn.main { display: none; }
+.note:not(.sent) .acts .btn.again { display: none; }
+.note .acts form { margin: 0; }
+
+/* AI 기록 상세 */
+pre.raw { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 14px; background: #fffef8; border: 1px solid var(--rule); border-radius: 8px; padding: 10px 12px; margin: 0; max-height: 360px; overflow: auto; }
+
+/* 인쇄용 재고표 */
+@media print {
+  body.print { background: #fff; }
+  .no-print { display: none !important; }
+}
+body.print { margin: 0; background: #fff; color: #000; font-family: var(--font); }
+.print-page { padding: 12mm 10mm; }
+.print-page h1 { font-size: 20px; margin: 0 0 6px; display: flex; justify-content: space-between; }
+.print-tbl { width: 100%; border-collapse: collapse; table-layout: fixed; font-size: 14px; }
+.print-tbl th, .print-tbl td { border: 1px solid #333; height: 30px; padding: 0 6px; }
+.print-tbl th { background: #d9d9d9; font-weight: 700; }
+.print-tbl td.gap, .print-tbl th.gap { border: 0; background: none; width: 8px; }
+
+/* 재고표 확인: 재고표에 없는 품목 [0 맞아요] (맞아요 칩과 같은 모양, 세는 규칙은 따로) */
+.chip-zero { position: relative; display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: var(--tap); padding: 0 14px;
+  border-radius: 8px; border: 2px solid var(--ink); background: #fff; font-size: 17px; font-weight: 800; color: var(--ink); cursor: pointer; user-select: none; white-space: nowrap; }
+.chip-zero input { position: absolute; opacity: 0; width: 1px; height: 1px; }
+.chip-zero:has(:checked) { background: #1f4d2b; border-color: #1f4d2b; color: #fff; }
+.chip-zero:has(:focus-visible) { outline: 3px solid var(--leaf); outline-offset: 2px; }
+/* 고친 빨간 줄·확인한 "재고표에 없음" 줄 (JS가 resolved를 붙인다) */
+.review-form .fixrow.resolved { counter-increment: none !important; background: #fff8d6; border-color: #1f4d2b; box-shadow: inset 6px 0 0 #1f4d2b; }
+.fixrow.resolved .done-mark { display: inline; }
+.fixrow.resolved .badge.err { display: none; }
+.review-form .fixrow.miss:not(.resolved) { counter-increment: left; }
+.review-form:not(:has(.fixrow.err)):has(.fixrow.miss:not(.resolved)) .go-left { display: flex; }
+.review-form:has(.fixrow.miss:not(.resolved)) .left-count { display: inline; }
+.review-form:not(:has(.fixrow.err)):has(.fixrow.miss:not(.resolved)) .btn.confirm { display: none; }
+.fixrow.unresolved { outline: 3px solid var(--red); outline-offset: 2px; }
+#fixes { scroll-margin-top: 12px; }
+.fixrow { scroll-margin-top: 12px; }
+
+/* 접는 단추 (그만 다루기 · 거래처 추가) */
+.danger-zone summary, details.sup-row > summary { list-style: none; cursor: pointer; }
+.danger-zone summary::-webkit-details-marker, details.sup-row > summary::-webkit-details-marker { display: none; }
+.memos .memo-research { padding: 0 14px 10px 76px; font-size: var(--fs-s); line-height: 1.55; overflow-wrap: anywhere; }
+
+/* 노란 줄이 7개 넘는 날: 화면이 온통 노랗지 않게 카드 바탕만 옅게, 띠·"확인" 칩은 진노랑 그대로 (정호 #104) */
+.review-form.many .fixrow:not(.err):not(.resolved):not(:has(.chip-ok :checked)) { background: var(--tag-soft); }
+.review-form.many .fixrow.need-num:has(.field-num input[inputmode]:not(:placeholder-shown)) { background: #fff8d6; }

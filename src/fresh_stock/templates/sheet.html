@@ -1,37 +1,57 @@
 {% extends "base.html" %}
 {% set active = "sheet" %}
-{% block title %}마감 재고표{% endblock %}
+{% block title %}재고표 올리기{% endblock %}
 {% block content %}
-<h1>{{ day | day }} 마감 재고표</h1>
-{% if error %}<div class="alert">{{ error }}</div>{% endif %}
 {% if step != "sheet" %}
-  <div class="card">{{ status_day | day }} 발주가 아직 남아 있어요. <a href="/order">발주 확인하기</a></div>
+  <h1 class="title">재고표</h1>
+  <div class="card">{{ status_day | day }} 마감 재고는 확정했어요. 지금은 발주를 확인할 차례예요.
+    <a class="btn main" href="/order" style="margin-top:12px" data-loading="발주 추천 만드는 중" data-loading-sub="메모가 있으면 AI가 확인하느라 1~3분" data-steps="마감 재고 불러오기|가게 메모 확인|지난 비슷한 날 찾기|품목별 수량 계산">발주 확인하기</a></div>
 {% else %}
-{% if saved %}<div class="note">입고를 저장했어요.</div>{% endif %}
-{% if store_layout %}
-<p class="muted">재고표의 사입 수량·가격 칸이 그날 들어온 양과 산 가격으로 기록돼요. 주문과 다르게 들어왔으면 종이에 실제 양을 적어 주세요.</p>
-{% else %}
-<div class="card row" style="justify-content:space-between">
-  <span>오늘 입고 {{ n_received }}품목{% if n_differs %} <span class="flags">· 주문과 다른 품목 {{ n_differs }}개</span>{% endif %}
-    <br><span class="muted">주문과 다르게 들어왔으면 재고표를 읽기 전에 고쳐 주세요.</span></span>
-  <a class="btn small secondary" href="/received">입고 확인·수정</a>
-</div>
-{% endif %}
-<div class="card">
-  <form method="post" action="/sheet" enctype="multipart/form-data" data-loading="AI가 재고표를 읽는 중이에요. 20초 정도 걸려요.">
-    <p style="margin-top:0">평소처럼 종이에 적은 마감 재고표를 찍어 올려 주세요.</p>
-    <input type="file" name="photo" accept="image/*" capture="environment" required style="width:100%; margin-bottom:12px">
-    <button class="btn block">사진 올리고 읽기</button>
+  <h1 class="title">{{ day | day }} 재고표 올리기</h1>
+  <p class="sub">손으로 적은 재고표를 찍으면 AI가 읽어요.</p>
+  {% if saved %}<div class="note-ok">입고를 저장했어요.</div>{% endif %}
+  {% if error %}
+    <div class="card state err">
+      <h3>사진을 읽지 못했어요</h3>
+      <p>재고표가 잘렸거나 너무 어두웠을 수 있어요. 귀퉁이 네 곳이 다 보이게 다시 찍어 주세요.</p>
+      <p class="muted" style="margin-top:-8px">{{ error }}</p>
+    </div>
+  {% endif %}
+  <form method="post" action="/sheet" enctype="multipart/form-data" data-loading="재고표 읽는 중" data-loading-sub="보통 30초~1분" data-steps="{{ read_steps }}">
+    <label class="shoot">
+      <input type="file" name="photo" accept="image/*" capture="environment" data-autosubmit required>
+      <svg class="ico" width="48" height="48" aria-hidden="true" style="width:48px;height:48px"><use href="#i-camera"/></svg>
+      <b>{{ '다시 찍기' if error else '재고표 찍기' }}</b>
+      <span>찍으면 바로 올라가요</span>
+    </label>
   </form>
-</div>
-<div class="card">
-  <form method="post" action="/sheet/demo" data-loading="합성 재고표를 만들고 AI가 읽는 중이에요. 20초 정도 걸려요.">
-    <p style="margin-top:0" class="muted">데모: 사진이 없으면 오늘 예상 재고로 손글씨 폰트 재고표를 만들어 읽어요.</p>
-    <button class="btn secondary block">합성 재고표로 해보기</button>
+  <form method="post" action="/sheet" enctype="multipart/form-data" data-loading="재고표 읽는 중" data-loading-sub="보통 30초~1분" data-steps="{{ read_steps }}">
+    <label class="btn line block" style="margin-bottom:16px">사진첩에서 고르기<input type="file" name="photo" accept="image/*" data-autosubmit hidden></label>
   </form>
-</div>
-{% if has_rows %}
-  <p><a href="/sheet/review">읽어 둔 결과 확인하기</a></p>
-{% endif %}
+
+  <div class="card flat list">
+    {% if rows %}
+      <a href="/sheet/review"><span><b>오늘 재고표</b><br><span class="muted">{{ rows | length }}줄 읽음{% if flagged %} · 노란 줄 {{ flagged }}개{% endif %}</span></span>
+        <span class="end"><span class="badge ok">✓ 읽음</span> ›</span></a>
+    {% else %}
+      <div class="li"><span><b>오늘 재고표</b><br><span class="muted">아직 안 올림 · 위 버튼으로 찍기</span></span></div>
+    {% endif %}
+    {% if not store_layout %}
+      <a href="/received"><span><b>오늘 입고</b><br><span class="muted">{{ n_received }}품목{% if n_differs %} · 주문과 다른 품목 {{ n_differs }}개{% endif %}</span></span><span class="end">입고 확인 ›</span></a>
+    {% endif %}
+  </div>
+  {% if store_layout %}<p class="muted">재고표의 사입 수량·가격 칸이 그날 들어온 양과 산 가격으로 기록돼요. 주문과 다르게 들어왔으면 종이에 실제 양을 적어 주세요.</p>{% endif %}
+
+  <div class="card">
+    <b>잘 읽히게 찍는 법</b>
+    <ul class="tips">
+      <li>종이 네 귀퉁이가 다 보이게</li>
+      <li>형광등 반사가 숫자에 걸리지 않게</li>
+      <li>4반·0.5 모두 그대로 적어도 돼요</li>
+    </ul>
+  </div>
+  <form method="post" action="/sheet/demo" data-loading="합성 재고표 읽는 중" data-loading-sub="데모: 오늘 예상 재고로 손글씨 재고표를 만들어 읽어요" data-steps="{{ read_steps }}">
+    <button class="btn ghost block">합성 재고표로 해보기</button>
+  </form>
 {% endif %}
 {% endblock %}

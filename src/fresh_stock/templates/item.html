@@ -1,44 +1,54 @@
 {% extends "base.html" %}
-{% set active = "settings" %}
+{% import "_ui.html" as ui %}
+{% set active = "more" %}
 {% block title %}{{ '품목 고치기' if item_id else '품목 추가' }}{% endblock %}
-{% block content %}
-<h1>{{ values.get('name') if item_id else '품목 추가' }}</h1>
-{% if error %}<div class="alert">{{ error }}</div>{% endif %}
-<form method="post" action="/settings/item" class="card">
-  {% if item_id %}<input type="hidden" name="item_id" value="{{ item_id }}">{% endif %}
-  <table>
-    <colgroup><col style="width:8em"><col></colgroup>
-    <tr><th>이름</th><td><input name="name" value="{{ values.get('name', '') }}" required maxlength="20" style="width:100%">
-      <div class="muted">재고표에 적는 정식 이름. 줄임말은 확인 화면에서 고치면 AI가 익혀요.</div></td></tr>
-    <tr><th>분류</th><td><select name="category">
-      {% for c in categories %}<option {{ 'selected' if c == values.get('category') }}>{{ c }}</option>{% endfor %}</select></td></tr>
-    <tr><th>단위</th><td><select name="unit">
-      {% for u in units %}<option {{ 'selected' if u == values.get('unit') }}>{{ u }}</option>{% endfor %}</select>
-      <div class="muted">재고표에 숫자만 적으면 이 단위로 읽어요. 박스는 반 박스(0.5)까지 적어요.</div></td></tr>
-    <tr><th>거래처</th><td><select name="supplier_id">
-      {% for s in catalog.suppliers %}<option value="{{ s.id }}" {{ 'selected' if s.id == values.get('supplier_id') }}>{{ s.name }}</option>{% endfor %}</select></td></tr>
-    <tr><th>판매가</th><td><input name="price" inputmode="numeric" value="{{ values.get('price', '') }}" required style="width:9em"> 원 / 단위</td></tr>
-    <tr><th>매입가</th><td><input name="cost" inputmode="numeric" value="{{ values.get('cost', '') }}" required style="width:9em"> 원 / 단위</td></tr>
-    <tr><th>하루 판매량</th><td><input name="base_demand" inputmode="decimal" value="{{ values.get('base_demand', '') }}" required style="width:6em"> 단위
-      <div class="muted">평일 하루에 대략 얼마나 나가는지. 판매 기록이 생기기 전 첫 발주 추천에만 써요.</div></td></tr>
-    <tr><th>정가로 파는 기간</th><td><input name="shelf_life" inputmode="numeric" value="{{ values.get('shelf_life', '') }}" required style="width:4em"> 일
-      <div class="muted">들어온 날부터 정가로 팔 수 있는 날 수. 지나면 떨이로 봐요 (딸기 1일, 사과 3일 등).</div></td></tr>
-  </table>
-  <button class="btn block" style="margin-top:12px">저장</button>
-</form>
-{% if item_id %}
-  {% set active_now = item_id in (catalog.items | map(attribute='id') | list) %}
-  <form method="post" action="/settings/item/{{ item_id }}/active" class="card">
-    <input type="hidden" name="active" value="{{ 0 if active_now else 1 }}">
-    {% if active_now %}
-      <p class="muted" style="margin-top:0">더 이상 들여오지 않는 품목이면 취급을 그만두세요. 재고표·발주·거래처 문자에서 빠지고, 지난 기록은 남아요.
-        남은 재고가 있으면 다 판 뒤에 그만둬야 판매량 계산이 맞아요.</p>
-      <button class="btn small secondary">취급 그만두기</button>
-    {% else %}
-      <p class="muted" style="margin-top:0">취급을 그만둔 품목이에요.</p>
-      <button class="btn small secondary">다시 취급</button>
-    {% endif %}
+{% block page %}
+{{ ui.top(store_name, "", "/settings", late) }}
+<main class="body">
+  {% if item %}
+    <div class="item-hero">{{ ui.pic(item, true) }}<span><b style="font-size:24px">{{ item.name }}</b><br>
+      <span class="muted">{{ (catalog.suppliers | selectattr('id', 'equalto', item.supplier_id) | map(attribute='name') | first) or '' }} · {{ item.unit }}{{ ' · 그만둔 품목' if not active_now }}</span></span></div>
+  {% else %}
+    <h1 class="title">품목 추가</h1>
+  {% endif %}
+  {% if error %}<div class="alert err">{{ error }}</div>{% endif %}
+  <form method="post" action="/settings/item">
+    {% if item_id %}<input type="hidden" name="item_id" value="{{ item_id }}">{% endif %}
+    <div class="card">
+      <label class="field"><span>이름 <span class="muted">재고표에 적는 정식 이름</span></span>
+        <input class="input" name="name" value="{{ values.get('name', '') }}" required maxlength="20"></label>
+      <label class="field"><span>단위 <span class="muted">숫자만 적으면 이 단위로 읽어요</span></span>
+        <select class="input" name="unit">{% for u in units %}<option {{ 'selected' if u == values.get('unit') }}>{{ u }}</option>{% endfor %}</select></label>
+      <label class="field"><span>분류</span>
+        <select class="input" name="category">{% for c in categories %}<option {{ 'selected' if c == values.get('category') }}>{{ c }}</option>{% endfor %}</select></label>
+      <label class="field"><span>거래처</span>
+        <select class="input" name="supplier_id">{% for s in catalog.suppliers %}<option value="{{ s.id }}" {{ 'selected' if s.id == values.get('supplier_id') }}>{{ s.name }} ({{ s.channel }})</option>{% endfor %}</select></label>
+      <label class="field"><span>판매가 <span class="muted">한 {{ values.get('unit', '단위') }}에</span></span>{{ ui.money('price', values.get('price', ''), '판매가') }}</label>
+      <label class="field"><span>매입가 <span class="muted">평소 사입 가격</span></span>{{ ui.money('cost', values.get('cost', ''), '매입가') }}</label>
+      <div class="field"><span>하루 판매량 <span class="muted">평일 대략 · 기록이 생기기 전 첫 추천에만 써요</span></span>
+        <span class="num-unit"><span class="field-num"><input name="base_demand" value="{{ values.get('base_demand', '') }}" inputmode="decimal" required aria-label="하루 판매량" autocomplete="off"></span><b>{{ values.get('unit', '') }}</b></span></div>
+      <div class="field" style="margin:0"><span>정가로 파는 기간 <span class="muted">지나면 떨이로 봐요 (딸기 1일, 사과 3일)</span></span>
+        <span class="num-unit"><span class="field-num"><input name="shelf_life" value="{{ values.get('shelf_life', '') }}" inputmode="numeric" required aria-label="정가로 파는 기간" autocomplete="off"></span><b>일</b></span></div>
+    </div>
+    <button class="btn main">저장</button>
   </form>
-{% endif %}
-<p><a href="/settings">품목·설정으로 돌아가기</a></p>
+  {% if item_id %}
+    <div class="danger-zone">
+      {% if active_now %}
+        <details><summary class="btn danger block">이 품목 그만 다루기</summary>
+          <form method="post" action="/settings/item/{{ item_id }}/active" class="card" style="margin-top:8px">
+            <input type="hidden" name="active" value="0">
+            <p style="margin:0 0 10px">재고표·발주·거래처 문자에서 빠지고, 지난 기록은 남아요. 남은 재고가 있으면 다 판 뒤에 그만둬야 판매량 계산이 맞아요.</p>
+            <button class="btn danger block">네, 그만 다룰게요</button>
+          </form>
+        </details>
+        <span class="muted">한 번 더 묻고 빼요. 지난 기록은 남아요.</span>
+      {% else %}
+        <form method="post" action="/settings/item/{{ item_id }}/active"><input type="hidden" name="active" value="1">
+          <button class="btn line block">다시 취급하기</button></form>
+      {% endif %}
+    </div>
+  {% endif %}
+</main>
+{{ ui.tabbar("more") }}
 {% endblock %}

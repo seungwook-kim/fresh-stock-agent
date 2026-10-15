@@ -18,7 +18,7 @@ from pathlib import Path
 from .domain import Category, Item, Supplier
 
 ITEM_FIELDS = ("id", "name", "category", "unit", "supplier_id", "base_demand", "price", "cost", "shelf_life", "active")
-SUPPLIER_FIELDS = ("id", "name", "channel")
+SUPPLIER_FIELDS = ("id", "name", "channel", "phone")
 
 
 @dataclass(frozen=True)
@@ -80,7 +80,7 @@ def load_catalog(
 ) -> Catalog:
     """CSV에서 품목·거래처를 읽는다. 품목 CSV에 active 열이 있으면 0인 품목은 취급을 그만둔 품목이다."""
     suppliers = tuple(
-        Supplier(id=r["id"], name=r["name"], channel=r["channel"])
+        Supplier(id=r["id"], name=r["name"], channel=r["channel"], phone=(r.get("phone") or "").strip())
         for r in _read_rows(suppliers_csv, "suppliers.csv")
     )
     supplier_ids = {s.id for s in suppliers}
@@ -121,5 +121,5 @@ def catalog_csv(catalog: Catalog) -> tuple[str, str]:
     w = csv.writer(suppliers, lineterminator="\n")
     w.writerow(SUPPLIER_FIELDS)
     for s in catalog.suppliers:
-        w.writerow([s.id, s.name, s.channel])
+        w.writerow([s.id, s.name, s.channel, s.phone])
     return items.getvalue(), suppliers.getvalue()

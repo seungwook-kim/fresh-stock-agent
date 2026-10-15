@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% set active = "more" %}
+{% block title %}더보기{% endblock %}
+{% block content %}
+<h1 class="title">더보기</h1>
+<div class="card flat list more-menu">
+  <a href="/settings"><svg class="ico" aria-hidden="true"><use href="#i-clipboard-list"/></svg><span>품목·설정<br><span class="muted">품목 {{ n_items }} · 거래처 {{ n_suppliers }} · 장날 · 재고표 형식</span></span><span class="end">›</span></a>
+  {% if received_day and sheet_layout != 'store' %}
+    <a href="/received"><svg class="ico" aria-hidden="true"><use href="#i-truck"/></svg><span>입고 확인<br><span class="muted">{{ received_day | day }} 입고분 · 다르게 온 것만 고쳐요</span></span><span class="end">›</span></a>
+  {% endif %}
+  <a href="/members"><svg class="ico" aria-hidden="true"><use href="#i-store"/></svg><span>가게 관리<br><span class="muted">같이 쓰는 사람 {{ n_members }}명 · 가게 이름</span></span><span class="end">›</span></a>
+  <a href="/logs"><svg class="ico" aria-hidden="true"><use href="#i-history"/></svg><span>AI 기록<br><span class="muted">AI가 읽고 추천한 내역 · 익힌 줄임말</span></span><span class="end">›</span></a>
+  <a href="/stores"><svg class="ico" aria-hidden="true"><use href="#i-arrow-left-right"/></svg><span>가게 바꾸기<br><span class="muted">{% if others %}{{ others | map(attribute='store_name') | join(' · ') }}{% else %}새 가게 만들기{% endif %}</span></span><span class="end">›</span></a>
+</div>
+<div class="logout"><a class="btn ghost" href="/logout">로그아웃</a><span class="muted">{{ user }}</span></div>
+{% endblock %}

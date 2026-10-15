@@ -1,16 +1,16 @@
 {% extends "base.html" %}
-{% set active = "logs" %}
+{% set active = "more" %}
+{% set back = "/logs" %}
 {% block title %}AI 기록{% endblock %}
 {% block content %}
-<p><a href="/logs">← AI 기록</a></p>
-<h1>{{ call.purpose }}</h1>
-<p class="muted" style="margin-top:-6px">{{ call.at or '-' }} · {{ '%.1f' % call.seconds }}초 ·
-  입력 {{ '{:,}'.format(call.input_tokens) }} / 출력 {{ '{:,}'.format(call.output_tokens) }} 토큰
-  {% if call.images %}· 사진 {{ call.images }}장 (원본은 기록하지 않음){% endif %}</p>
-{% if call.error %}<div class="alert">실패: {{ call.error }}</div>{% endif %}
-<h2>받은 결과</h2>
-<pre class="msg">{{ output or '(없음)' }}</pre>
-<h2>보낸 프롬프트</h2>
-<pre class="msg">{{ call.prompt }}</pre>
-<details class="card" style="margin-top:12px"><summary>시스템 프롬프트</summary><pre class="msg">{{ call.system }}</pre></details>
+<h1 class="title">{{ label }}</h1>
+<p class="sub">{{ call.purpose }} · {{ (call.at or "-") | replace("T", " ") }} · {{ '%.1f' % (call.seconds or 0) }}초 ·
+  입력 {{ call.input_tokens | comma }} / 출력 {{ call.output_tokens | comma }} 토큰
+  {% if call.images %}· 사진 {{ call.images }}장 (원본은 남기지 않아요){% endif %}</p>
+{% if call.error %}<div class="alert err">실패: {{ call.error }}</div>{% endif %}
+<h2 class="sec">받은 결과</h2>
+<pre class="raw">{{ output or '(없음)' }}</pre>
+<h2 class="sec">보낸 내용</h2>
+<pre class="raw">{{ call.prompt }}</pre>
+<details class="card" style="margin-top:12px"><summary><b>지시문 (시스템 프롬프트)</b></summary><pre class="raw" style="margin-top:8px">{{ call.system }}</pre></details>
 {% endblock %}
